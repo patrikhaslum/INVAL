@@ -4,7 +4,7 @@
 ;; actions, axioms and mutex groups.
 
 (defvar *path-to-python* "python3")
-(defvar *path-to-FD-dump.py* "/home/path/pkg/fd-clean/src/translate/dump.py")
+(defvar *path-to-FD-dump.py* "dump.py")
 
 (defun call-fd-dump (domain-path problem-path)
   (multiple-value-bind
