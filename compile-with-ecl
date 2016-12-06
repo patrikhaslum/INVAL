@@ -1,0 +1,84 @@
+#!/usr/local/bin/ecl -shell
+
+;; A simple make system
+
+(require 'cmp)
+
+(defun make-compile-file (source-file-list object-file)
+  (compile-file (first source-file-list) :system-p t))
+
+(defun make-link-executable (object-file-list exec-file)
+  (c:build-program exec-file :lisp-files object-file-list))
+
+(defun make-static-library (object-file-list lib-file)
+  (c:build-static-library lib-file
+			  :lisp-files object-file-list
+			  :init-name "init_library"))
+
+(defvar *dependencies*
+  (list (list "inval" '("inval.o" "vis.o" "inval-main.o")
+              #'make-link-executable)
+	(list "inval.a" '("inval.o" "vis.o" "inval-main.o")
+              #'make-static-library)
+	(list "rsk" '("inval.o" "rsk.o" "rsk-main.o") #'make-link-executable)
+	(list "simplify" '("inval.o" "rsk.o" "simplify.o" "simplify-main.o") #'make-link-executable)
+	(list "translate" '("inval.o" "translate-main.o") #'make-link-executable)
+	(list "nyat" '("inval.o" "rsk.o" "tools.o" "simplify.o" "fdr3.o" "nyat-main.o") #'make-link-executable)
+	(list "run-val-test-ipc4"
+	      '("inval.o" "val-test-util.o" "run-val-test-ipc4.o")
+              #'make-link-executable)
+	(list "inval.o" '("inval.lsp") #'make-compile-file)
+	(list "vis.o" '("vis.lsp") #'make-compile-file)
+	(list "rsk.o" '("rsk.lsp") #'make-compile-file)
+	(list "tools.o" '("tools.lsp") #'make-compile-file)
+	(list "simplify.o" '("simplify.lsp") #'make-compile-file)
+	(list "fdr3.o" '("fdr3.lsp") #'make-compile-file)
+	(list "inval-main.o" '("inval-main.lsp") #'make-compile-file)
+	(list "translate-main.o" '("translate-main.lsp") #'make-compile-file)
+	(list "rsk-main.o" '("rsk-main.lsp") #'make-compile-file)
+	(list "simplify-main.o" '("simplify-main.lsp") #'make-compile-file)
+	(list "nyat-main.o" '("nyat-main.lsp") #'make-compile-file)
+	(list "val-test-util.o" '("val-test-util.lsp")
+	      #'make-compile-file)
+	(list "run-val-test-ipc4.o" '("run-val-test-ipc4.lsp")
+	      #'make-compile-file)
+	))
+
+(defun file-newer-than (file1 file2)
+  (= (ext:system (concatenate 'string "test " file1 " -nt " file2)) 0))
+
+(defun file-exists (file)
+  (= (ext:system (concatenate 'string "test -f " file)) 0))
+
+(defun need-to-make (target deps)
+  (or (not (file-exists target))
+      (some #'(lambda (pred-file) (file-newer-than pred-file target)) deps)))
+
+(defun make (target)
+  (let ((rule (assoc target *dependencies* :test #'equal)))
+    (cond (rule
+	   (dolist (pred (second rule))
+	     (if (assoc pred *dependencies* :test #'equal)
+		 (make pred)))
+	   (cond ((need-to-make (first rule) (second rule))
+		  (format t "~&making ~a...~%" (first rule))
+		  (let ((retval
+			 (funcall (third rule) (second rule) (first rule))))
+		    (cond ((not retval)
+			   (format t "~&exiting because of errors...~%")
+			   (quit))
+			  (t retval))))
+		 (t (format t "~&~a is up to date~%" target))))
+	  (t (format t "~&no rule to make ~a~%" target))
+	  )))
+
+
+(make "inval")
+(make "rsk")
+(make "simplify")
+;; (make "translate")
+(make "nyat")
+
+(make "run-val-test-ipc4")
+
+(terpri)
