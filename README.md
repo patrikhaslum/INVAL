@@ -27,5 +27,28 @@ it does not handle temporal plans. It should, however, handle numeric
 and object-valued fluents, and derived predicates. And it's not
 efficient.
 
+## Compilation and usage
+
 INVAL is written in LISP. For instructions on how to run it, see
 comments at the beginning of the main file ("inval.lsp").
+
+## Other PDDL tools
+
+This package also includes a set of other PDDL tools:
+
+* `rsk` is a domain/problem compiler that removes object fluents (PDDL
+  version 3.1). It can either compile them away completely (producing
+  standard ADL-like PDDL) or compile away only nested fluents (producing
+  something analogous to SAS+).
+
+* `simplify` is a domain/problem simplifier. It outputs "simple ADL",
+  which may still have conditional effects but no quantifiers or
+  disjunction.
+
+* `nyat` converts PDDL into FastDownward's internal SAS+ format. In other
+  words, it is a drop-in replacement for the FastDownward translator.
+  Compared to the FD translator, it is _much less efficient_, and it does
+  not automatically generate finite-domain variables from the propositional
+  PDDL representation. Instead (and unlike the FD translator), it preserves
+  any object fluents (i.e., SAS+ variables) in the PDDL input. This means
+  that it gives you full control over the generated SAS+ representation.
