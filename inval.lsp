@@ -303,10 +303,10 @@
 	))
 
 (defvar *builtin-numeric-predicates*
-  (list (list '< 2 2 #'<)
-	(list '<= 2 2 #'<=)
-	(list '> 2 2 #'>)
-	(list '>= 2 2 #'>=)
+  (list (list '< 2 2 #'(lambda (args) (< (first args) (second args))))
+	(list '<= 2 2 #'(lambda (args) (<= (first args) (second args))))
+	(list '> 2 2 #'(lambda (args) (> (first args) (second args))))
+	(list '>= 2 2 #'(lambda (args) (>= (first args) (second args))))
 	))
 
 ;; List of predicate names that will be treated specially: when they
