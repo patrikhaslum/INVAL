@@ -767,3 +767,81 @@
     ;; end table
     (format result "~&</table>~%")
     ))
+
+;; custom table generator
+
+(defun print-custom-table-row (stream cols state)
+  (dolist (col cols)
+    (format stream "    <td>~%")
+    ;; (first ss) is the state
+    (let ((exp (second col)))
+      (cond
+       ((eq (car exp) 'find-predicate-arguments)
+	(let ((res (find-predicate-arguments
+		    (second exp) (third exp) (fourth exp) (fifth exp)
+		    (first ss))))
+	  (format stream "~a" res)))
+       (t
+	(let ((res (eval-term exp nil (first ss))))
+	  (format stream "~a" (car res))))
+       ))
+    (format stream "    </td>~%")
+    ))
+
+(defun visualise-custom-table (cols plan ss)
+  (with-output-to-string
+    (result)
+    ;; table header
+    (format result "~&<table border=\"1\">~%")
+    (format result "  <tr>~%  <td align=\"center\"><i>Action</i></td>~%")
+    (dolist (col cols)
+      (format result "    <td align=\"center\"><i>~a</i></td>~%  </tr>~%" (first col))
+      )
+    ;; initial state
+    (format result "  <tr>~%    <td>Initial state</td>~%")
+    (print-custom-table-row result cols (first ss))
+    (format result "  <tr>~%")
+    ;; main loop
+    (do ((rem-plan plan (cdr rem-plan))
+	 (rem-ss (cdr ss) (cdr rem-ss)))
+	((endp rem-plan) t)
+      (format result "  <tr>~%    <td><tt>~a</tt></td>~%"
+	      (car rem-plan))
+      (print-state-html result cols (car rem-ss))
+      (format result "  <tr>~%"))
+    ;; end table
+    (format result "~&</table>~%")
+    ))
+
+;; numeric hbw, table form
+
+(defun visualise-numeric-hbw (plan ss)
+  (let ((cyls (objects-of-type 'cylinder *types* *objects*)))
+    (cond
+     ((= (length cyls) 3)
+      (visualise-custom-table
+       '(((in c0) (find-predicate-arguments in (1) (2) (c0)))
+	 ((h c0) (+ (* (/ 1 (total_area)) (volume))
+		    (+ (* (/ 1 (total_area)) (/ (weight_on c1) (density)))
+		       (- (* (/ 1 (total_area)) (/ (weight_on c2) (density)))
+			  (* (/ (- (total_area) (area c0))
+				(* (total_area) (area c0)))
+			     (/ (weight_on c0) (density)))))))
+	 ((in c1) (find-predicate-arguments in (1) (2) (c1)))
+	 ((h c1) (+ (* (/ 1 (total_area)) (volume))
+		    (+ (* (/ 1 (total_area)) (/ (weight_on c0) (density)))
+		       (- (* (/ 1 (total_area)) (/ (weight_on c2) (density)))
+			  (* (/ (- (total_area) (area c1))
+				(* (total_area) (area c1)))
+			     (/ (weight_on c1) (density)))))))
+	 ((in c2) (find-predicate-arguments in (1) (2) (c2)))
+	 ((h c2) (+ (* (/ 1 (total_area)) (volume))
+		    (+ (* (/ 1 (total_area)) (/ (weight_on c0) (density)))
+		       (- (* (/ 1 (total_area)) (/ (weight_on c1) (density)))
+			  (* (/ (- (total_area) (area c2))
+				(* (total_area) (area c2)))
+			     (/ (weight_on c2) (density)))))))
+	 )
+       plan ss))
+     (t (error "visualisation not defined for cylinders ~s" cyls))
+     )))
