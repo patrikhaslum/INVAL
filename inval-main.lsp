@@ -54,6 +54,7 @@
 	    (list 'openstacks-sequencedstrips-nonADL-nonNegated
 		  #'visualise-openstacks 'latex)
 	    (list 'parking-game #'visualise-rush-hour 'latex)
+	    (list 'hydraulic_blocks_world #'visualise-numeric-hbw 'html)
 	    (list 'html-table #'visualise-html-table 'html)
 	    ))
 
