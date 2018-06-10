@@ -2438,6 +2438,37 @@
 ;; Note: In all functions below, the 'where' argument is used only to
 ;; print more informative error messages.
 
+;; Check that the type hierarchy is acyclic, and does not redefine
+;; built-in type names 'object and 'number.
+
+(defun check-type-hierarchy (types)
+  (let ((ok t))
+    (dolist (td types)
+      (let ((supers (find-all-super-types (car td) types)))
+	(cond ((member (car td) supers)
+	       (format t "~&cyclic type hierarchy ~s - ~s~%" (car td) supers)
+	       (setq ok nil))
+	      ((and (member (car td) '(object number)) supers)
+	       (format t "~&built-in types can not be redefined: ~s~%" td))
+	      )))
+    ok))
+
+;; Return a flat list with the names of all supertypes of a given
+;; type name. Should work even if the type hierarchy is cyclic.
+
+(defun find-all-super-types (typename types)
+  (let ((queue (list typename))
+	(result nil))
+    (loop
+     (if (endp queue) (return result))
+     (let* ((next (first queue))
+	    (sups (assoc-all next types))
+	    (new (set-difference sups result)))
+       (setq result (append result new))
+       (setq queue (append (rest queue) new))
+       ))
+    ))
+
 ;; Check if a given object can be passed where an object of type t2
 ;; is expected.
 
@@ -2474,9 +2505,9 @@
 	    (cdr t1)))
      (t (every #'(lambda (tt) (type-can-substitute-for-type tt t2 types where))
 	       (cdr t1)))))
-   ;; If t2 is a list, it must be of the form (either t1-1 t1-2 .. t1-n).
+   ;; If t2 is a list, it must be of the form (either t2-1 t2-2 .. t2-n).
    ;; In this case, substitution holds if t1 can substitute for any of
-   ;; the types t1-1 .. t1-n
+   ;; the types t2-1 .. t2-n
    ((listp t2)
     (cond
      ((not (eq (car t2) 'either))
@@ -2596,7 +2627,7 @@
 		 (rest term) context predicates functions types objects where
 		 :is-metric is-metric)))
       (cond
-       ((and (every #'(lambda (tt) tt) args) (== (length term) 3)) 'number)
+       ((and (every #'(lambda (tt) tt) args) (= (length term) 3)) 'number)
        (t nil))))
    ;; zero-ary function total-time is always defined
    ((eq (car term) 'total-time)
@@ -3033,37 +3064,41 @@
 ;; returns: t if everything is type correct, nil otherwise.
 
 (defun type-check ()
-  (let ((ok t))
-    (dolist (action *actions*)
-      (if (not (type-check-action
-		action *predicates* *functions* *types* *objects*))
-	  (setq ok nil)))
-    (dolist (axiom *axioms*)
-      (if (not (type-check-axiom
-		axiom *predicates* *functions* *types* *objects*))
-	  (setq ok nil)))
-    (if (not (type-check-formula-list
-	      *init* nil *predicates* *functions* *types* *objects* ':init
-	      :accept-preferences nil))
-	(setq ok nil))
-    (if (not (type-check-formula
-	      *goal* nil *predicates* *functions* *types* *objects* ':goal
-	      :accept-preferences t))
-	(setq ok nil))
-    (if (not (type-check-constraint-formula
-	      *constraints* nil *predicates* *functions* *types* *objects*
-	      ':constraints))
-	(setq ok nil))
-    (if *metric*
-	(let ((mt (type-check-term
-		   *metric* nil *predicates* *functions* *types* *objects*
-		   ':metric :is-metric t)))
-	  (cond ((null mt)
-		 (setq ok nil))
-		((not (eq mt 'number))
-		 (format t "~&:metric type is ~s (should be number)~%" mt)
-		 (setq ok nil)))))
-    ok))
+  (if (check-type-hierarchy *types*)
+      ;; if the type hierachy is ok, proceed with type checking...
+      (let ((ok t))
+	(dolist (action *actions*)
+	  (if (not (type-check-action
+		    action *predicates* *functions* *types* *objects*))
+	      (setq ok nil)))
+	(dolist (axiom *axioms*)
+	  (if (not (type-check-axiom
+		    axiom *predicates* *functions* *types* *objects*))
+	      (setq ok nil)))
+	(if (not (type-check-formula-list
+		  *init* nil *predicates* *functions* *types* *objects* ':init
+		  :accept-preferences nil))
+	    (setq ok nil))
+	(if (not (type-check-formula
+		  *goal* nil *predicates* *functions* *types* *objects* ':goal
+		  :accept-preferences t))
+	    (setq ok nil))
+	(if (not (type-check-constraint-formula
+		  *constraints* nil *predicates* *functions* *types* *objects*
+		  ':constraints))
+	    (setq ok nil))
+	(if *metric*
+	    (let ((mt (type-check-term
+		       *metric* nil *predicates* *functions* *types* *objects*
+		       ':metric :is-metric t)))
+	      (cond ((null mt)
+		     (setq ok nil))
+		    ((not (eq mt 'number))
+		     (format t "~&:metric type is ~s (should be number)~%" mt)
+		     (setq ok nil)))))
+	ok)
+    ;; error in type hierarchy, return nil
+    nil))
 
 ;; Return axiom with arguments in the header type-enhanced according to
 ;; parameters of the derived predicate. If the axiom is malformed, the
