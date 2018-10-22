@@ -3574,7 +3574,15 @@
   (let* ((str (symbol-name sym))
 	 (mstr (subseq str 1 (- (length str) 1))))
     (read-from-string mstr)))
-    
+
+;; parse a state/action policy: content is a list, as produced by
+;; read-file
+
+(defun parse-policy (filename content)
+  (dolist (item content)
+    (when (not (= (length item) 2))
+      (error "incorrect line ~s in ~s" item filename)))
+  (cons filename content))
 
 ;;;;
 ;; Causal link analysis
@@ -4962,10 +4970,191 @@
    ))
 
 
+;;;;
+;; Validation of state-action policy for probabilistic domains
+;; (experimental).
+
+(defun validate-policy (policy init goal actions types objects)
+  ;; may need to do some setup/cleanup (e.g., remove fluents from
+  ;; init?)
+  (when (not (member 'probabilistic *quoted-argument-predicates*))
+    (setq *quoted-argument-predicates*
+	  (cons 'probabilistic *quoted-argument-predicates*)))
+  (build-state-graph policy init goal actions types objects)
+  )
+
+(defun build-state-graph (policy init goal actions types objects)
+  (do (;; the state graph is a list of (state action transitions)
+       ;; lists; transitions is a list of (probability index) pairs.
+       (sgraph (list (list init nil nil nil)))
+       (queue (list 0))
+       (ok t)
+       )
+      ((or (endp queue) (not ok)) (list ok sgraph))
+      (format t "~&expanding state ~s of ~s, |queue| = ~s~%"
+	      (car queue) (length sgraph) (length queue))
+      (let* ((next-state (first (nth (car queue) sgraph)))
+	     (goal-eval (eval-formula goal nil next-state types objects))
+	     (result (expand-state next-state policy actions types objects))
+	     (exp-ok (first result))
+	     (exp-action (second result))
+	     (exp-succs (third result))
+	     (trans nil))
+	(cond
+	 ;; state expansion ok, goal formula is well-defined
+	 ((and exp-ok (second goal-eval))
+	  (dolist (ps exp-succs)
+	    (let ((index (find-state-in-graph (second ps) sgraph)))
+	      (when (null index)
+		;; state is new
+		(setq sgraph
+		      (nconc sgraph (list (list (second ps) nil nil nil))))
+		(setq index (- (length sgraph) 1))
+		(setq queue (nconc queue (list index))))
+	      (setq trans (nconc trans (list (list (first ps) index))))
+	      (setf (second (nth (car queue) sgraph)) exp-action)
+	      (setf (third (nth (car queue) sgraph)) trans)
+	      (setf (fourth (nth (car queue) sgraph)) (first goal-eval))
+	      ))
+	  (setq queue (cdr queue)))
+	 ((not (second goal-eval))
+	  (when (>= *verbosity* 1)
+	    (format t "~&goal formula ~s undefined in ~s~%" goal next-state))
+	  (setq ok nil)) ;; break loop
+	 (t
+	  (when (>= *verbosity* 1)
+	    (format t "~&expanding state ~s failed~%" next-state))
+	  (setq ok nil))) ;; break loop
+	)))
+
+(defun find-state-in-graph (state sgraph)
+  (let ((index 0))
+    (loop
+     (when (endp sgraph) (return nil))
+     (when (and (state-contains state (first (car sgraph)))
+		(state-contains (first (car sgraph)) state))
+       (return index))
+     (setq index (+ index 1))
+     (setq sgraph (cdr sgraph))
+     )))
+
+;; Returns a list of the most specific ((partial state) (action))
+;; pairs applicable to state.
+
+(defun apply-policy-to-state (state policy)
+  (let ((cands nil))
+    (dolist (item policy)
+      (if (state-contains state (first item))
+	  (if (not (some #'(lambda (citem)
+			     (state-contains (first item) (first citem)))
+			 cands))
+	      (setq cands
+		    (cons item
+			  (remove-if #'(lambda (citem)
+					 (state-contains (first citem)
+							 (first item)))
+				     cands))))))
+    cands))
+
+
+;; Expand a state using a policy.
+;; Returns a list (ok action successors), where successors is a list
+;; of pairs (probability state). Probabilities should sum to one, but
+;; this is not checked.
+
+(defun expand-state (state policy actions types objects)
+  (let ((cands (apply-policy-to-state state policy)))
+    (cond
+     ((endp cands)
+      (when (>= *verbosity* 1)
+	(format t "~&policy has no action for state ~s~%" state))
+      (list t nil nil))
+     ((> (length cands) 1)
+      (when (>= *verbosity* 1)
+	(format t "~&policy is ambiguous for state ~s~%" state)
+	(dolist (item cands)
+	  (format t "~& ~s -> ~s matches~%" (first item) (second item))))
+      (list nil (mapcar #'second cands) nil))
+     (t
+      (when (>= *verbosity* 2)
+	(format t "~&applying action ~s~%" (second (first cands))))
+      (let* ((action (second (first cands)))
+	     (ea (check-action action state actions types objects)))
+	(cond
+	 ((not (first ea))
+	  (when (>= *verbosity* 1)
+	    (format t "~&action ~s is undefined or inapplicable in state ~s~%" action state))
+	  (list nil action nil))
+	 (t (list t action
+		  (apply-probabilistic-action (cons action ea) state))))
+	))
+     )))
+
+
+;; Apply the propositional effects of a probabilistic action to a state
+;; (fluent effects are ignored).
+;; ea is the list (action ok read add del abs rel); probabilistic
+;; effects appear in add.
+;; Returns a list of (probability state) pairs.
+
+(defun apply-probabilistic-action (ea state)
+  (mapcar #'(lambda (oc)
+	      (list (car oc)
+		    (apply-effects
+		     (list (list (first ea) t nil (second oc) (third oc)
+				 nil nil nil))
+		     state)))
+	  (outcomes (fourth ea) nil (fifth ea))))
+
+
+;; Compute outcomes of a list
+;; adds-and-prob is a list that may contain probabilistic and atomic
+;; add effects. It is assumed that the effects contained in probabilistic
+;; cases are non-conditional and non-quantified (though they may be
+;; conjunctive).
+;; adds is a list of atomic (unconditional) add effects.
+;; dels is a list of atomic delete effects.
+;; Returns a list of outcomes (probability add del), where add and del
+;; are lists of atomic add/delete effects.
+
+(defun outcomes (adds-and-prob adds dels)
+  (cond ((endp adds-and-prob)
+	 (list (list 1 adds dels)))
+	((eq (caar adds-and-prob) 'probabilistic)
+	 (do ((cases (cdar adds-and-prob) (cddr cases))
+	      (ocs nil))
+	     ((endp cases) ocs)
+	     (let* ((prob (car cases))
+		    ;; collect-effects returns (ok read add del abs rel)
+		    (peff (collect-effects
+			   (cadr cases) t nil nil nil nil nil nil nil nil))
+		    (case-ocs (outcomes (cdr adds-and-prob)
+					(append (third peff) adds)
+					(append (fourth peff) dels)))
+		    )
+	       (setq ocs
+		     (append ocs (mapcar #'(lambda (oc)
+					     (cons (* prob (car oc)) (cdr oc)))
+					 case-ocs)))
+	       )))
+	(t (outcomes (cdr adds-and-prob)
+		     (cons (car adds-and-prob) adds)
+		     dels))
+	))
+
+
+;; Trivial implementation of (partial) state implication (non-strict).
+
+(defun state-contains (state pstate)
+  (cond ((endp pstate) t)
+	((find (car pstate) state :test #'equal)
+	 (state-contains state (cdr pstate)))
+	(t nil)))
+
 ;; force update of symbol completion table on load
-;; (eval-when (:load-toplevel)
-;;   (if (find-package "ECL-READLINE")
-;;       (let ((return-to-package *package*))
-;; 	(in-package "ECL-READLINE")
-;; 	(setq *current-package* nil)
-;; 	(in-package return-to-package))))
+(eval-when (:load-toplevel)
+  (if (find-package "ECL-READLINE")
+      (let ((return-to-package *package*))
+	(in-package "ECL-READLINE")
+	(setq *current-package* nil)
+	(in-package return-to-package))))

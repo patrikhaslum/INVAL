@@ -24,6 +24,8 @@
 	(list "simplify" '("inval.o" "rsk.o" "simplify.o" "simplify-main.o") #'make-link-executable)
 	(list "translate" '("inval.o" "translate-main.o") #'make-link-executable)
 	(list "nyat" '("inval.o" "rsk.o" "tools.o" "simplify.o" "fdr3.o" "nyat-main.o") #'make-link-executable)
+	(list "vapo" '("inval.o" "vis.o" "vapo-main.o")
+              #'make-link-executable)
 	(list "run-val-test-ipc4"
 	      '("inval.o" "val-test-util.o" "run-val-test-ipc4.o")
               #'make-link-executable)
@@ -38,6 +40,7 @@
 	(list "rsk-main.o" '("rsk-main.lsp") #'make-compile-file)
 	(list "simplify-main.o" '("simplify-main.lsp") #'make-compile-file)
 	(list "nyat-main.o" '("nyat-main.lsp") #'make-compile-file)
+	(list "vapo-main.o" '("vapo-main.lsp") #'make-compile-file)
 	(list "val-test-util.o" '("val-test-util.lsp")
 	      #'make-compile-file)
 	(list "run-val-test-ipc4.o" '("run-val-test-ipc4.lsp")
@@ -78,6 +81,7 @@
 (make "simplify")
 ;; (make "translate")
 (make "nyat")
+(make "vapo")
 
 (make "run-val-test-ipc4")
 
