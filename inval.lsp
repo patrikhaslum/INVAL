@@ -2438,6 +2438,37 @@
 ;; Note: In all functions below, the 'where' argument is used only to
 ;; print more informative error messages.
 
+;; Check that the type hierarchy is acyclic, and does not redefine
+;; built-in type names 'object and 'number.
+
+(defun check-type-hierarchy (types)
+  (let ((ok t))
+    (dolist (td types)
+      (let ((supers (find-all-super-types (car td) types)))
+	(cond ((member (car td) supers)
+	       (format t "~&cyclic type hierarchy ~s - ~s~%" (car td) supers)
+	       (setq ok nil))
+	      ((and (member (car td) '(object number)) supers)
+	       (format t "~&built-in types can not be redefined: ~s~%" td))
+	      )))
+    ok))
+
+;; Return a flat list with the names of all supertypes of a given
+;; type name. Should work even if the type hierarchy is cyclic.
+
+(defun find-all-super-types (typename types)
+  (let ((queue (list typename))
+	(result nil))
+    (loop
+     (if (endp queue) (return result))
+     (let* ((next (first queue))
+	    (sups (assoc-all next types))
+	    (new (set-difference sups result)))
+       (setq result (append result new))
+       (setq queue (append (rest queue) new))
+       ))
+    ))
+
 ;; Check if a given object can be passed where an object of type t2
 ;; is expected.
 
@@ -2474,9 +2505,9 @@
 	    (cdr t1)))
      (t (every #'(lambda (tt) (type-can-substitute-for-type tt t2 types where))
 	       (cdr t1)))))
-   ;; If t2 is a list, it must be of the form (either t1-1 t1-2 .. t1-n).
+   ;; If t2 is a list, it must be of the form (either t2-1 t2-2 .. t2-n).
    ;; In this case, substitution holds if t1 can substitute for any of
-   ;; the types t1-1 .. t1-n
+   ;; the types t2-1 .. t2-n
    ((listp t2)
     (cond
      ((not (eq (car t2) 'either))
@@ -2596,7 +2627,7 @@
 		 (rest term) context predicates functions types objects where
 		 :is-metric is-metric)))
       (cond
-       ((and (every #'(lambda (tt) tt) args) (== (length term) 3)) 'number)
+       ((and (every #'(lambda (tt) tt) args) (= (length term) 3)) 'number)
        (t nil))))
    ;; zero-ary function total-time is always defined
    ((eq (car term) 'total-time)
@@ -3033,37 +3064,41 @@
 ;; returns: t if everything is type correct, nil otherwise.
 
 (defun type-check ()
-  (let ((ok t))
-    (dolist (action *actions*)
-      (if (not (type-check-action
-		action *predicates* *functions* *types* *objects*))
-	  (setq ok nil)))
-    (dolist (axiom *axioms*)
-      (if (not (type-check-axiom
-		axiom *predicates* *functions* *types* *objects*))
-	  (setq ok nil)))
-    (if (not (type-check-formula-list
-	      *init* nil *predicates* *functions* *types* *objects* ':init
-	      :accept-preferences nil))
-	(setq ok nil))
-    (if (not (type-check-formula
-	      *goal* nil *predicates* *functions* *types* *objects* ':goal
-	      :accept-preferences t))
-	(setq ok nil))
-    (if (not (type-check-constraint-formula
-	      *constraints* nil *predicates* *functions* *types* *objects*
-	      ':constraints))
-	(setq ok nil))
-    (if *metric*
-	(let ((mt (type-check-term
-		   *metric* nil *predicates* *functions* *types* *objects*
-		   ':metric :is-metric t)))
-	  (cond ((null mt)
-		 (setq ok nil))
-		((not (eq mt 'number))
-		 (format t "~&:metric type is ~s (should be number)~%" mt)
-		 (setq ok nil)))))
-    ok))
+  (if (check-type-hierarchy *types*)
+      ;; if the type hierachy is ok, proceed with type checking...
+      (let ((ok t))
+	(dolist (action *actions*)
+	  (if (not (type-check-action
+		    action *predicates* *functions* *types* *objects*))
+	      (setq ok nil)))
+	(dolist (axiom *axioms*)
+	  (if (not (type-check-axiom
+		    axiom *predicates* *functions* *types* *objects*))
+	      (setq ok nil)))
+	(if (not (type-check-formula-list
+		  *init* nil *predicates* *functions* *types* *objects* ':init
+		  :accept-preferences nil))
+	    (setq ok nil))
+	(if (not (type-check-formula
+		  *goal* nil *predicates* *functions* *types* *objects* ':goal
+		  :accept-preferences t))
+	    (setq ok nil))
+	(if (not (type-check-constraint-formula
+		  *constraints* nil *predicates* *functions* *types* *objects*
+		  ':constraints))
+	    (setq ok nil))
+	(if *metric*
+	    (let ((mt (type-check-term
+		       *metric* nil *predicates* *functions* *types* *objects*
+		       ':metric :is-metric t)))
+	      (cond ((null mt)
+		     (setq ok nil))
+		    ((not (eq mt 'number))
+		     (format t "~&:metric type is ~s (should be number)~%" mt)
+		     (setq ok nil)))))
+	ok)
+    ;; error in type hierarchy, return nil
+    nil))
 
 ;; Return axiom with arguments in the header type-enhanced according to
 ;; parameters of the derived predicate. If the axiom is malformed, the
@@ -3539,7 +3574,15 @@
   (let* ((str (symbol-name sym))
 	 (mstr (subseq str 1 (- (length str) 1))))
     (read-from-string mstr)))
-    
+
+;; parse a state/action policy: content is a list, as produced by
+;; read-file
+
+(defun parse-policy (filename content)
+  (dolist (item content)
+    (when (not (= (length item) 2))
+      (error "incorrect line ~s in ~s" item filename)))
+  (cons filename content))
 
 ;;;;
 ;; Causal link analysis
@@ -4927,10 +4970,191 @@
    ))
 
 
+;;;;
+;; Validation of state-action policy for probabilistic domains
+;; (experimental).
+
+(defun validate-policy (policy init goal actions types objects)
+  ;; may need to do some setup/cleanup (e.g., remove fluents from
+  ;; init?)
+  (when (not (member 'probabilistic *quoted-argument-predicates*))
+    (setq *quoted-argument-predicates*
+	  (cons 'probabilistic *quoted-argument-predicates*)))
+  (build-state-graph policy init goal actions types objects)
+  )
+
+(defun build-state-graph (policy init goal actions types objects)
+  (do (;; the state graph is a list of (state action transitions)
+       ;; lists; transitions is a list of (probability index) pairs.
+       (sgraph (list (list init nil nil nil)))
+       (queue (list 0))
+       (ok t)
+       )
+      ((or (endp queue) (not ok)) (list ok sgraph))
+      (format t "~&expanding state ~s of ~s, |queue| = ~s~%"
+	      (car queue) (length sgraph) (length queue))
+      (let* ((next-state (first (nth (car queue) sgraph)))
+	     (goal-eval (eval-formula goal nil next-state types objects))
+	     (result (expand-state next-state policy actions types objects))
+	     (exp-ok (first result))
+	     (exp-action (second result))
+	     (exp-succs (third result))
+	     (trans nil))
+	(cond
+	 ;; state expansion ok, goal formula is well-defined
+	 ((and exp-ok (second goal-eval))
+	  (dolist (ps exp-succs)
+	    (let ((index (find-state-in-graph (second ps) sgraph)))
+	      (when (null index)
+		;; state is new
+		(setq sgraph
+		      (nconc sgraph (list (list (second ps) nil nil nil))))
+		(setq index (- (length sgraph) 1))
+		(setq queue (nconc queue (list index))))
+	      (setq trans (nconc trans (list (list (first ps) index))))
+	      (setf (second (nth (car queue) sgraph)) exp-action)
+	      (setf (third (nth (car queue) sgraph)) trans)
+	      (setf (fourth (nth (car queue) sgraph)) (first goal-eval))
+	      ))
+	  (setq queue (cdr queue)))
+	 ((not (second goal-eval))
+	  (when (>= *verbosity* 1)
+	    (format t "~&goal formula ~s undefined in ~s~%" goal next-state))
+	  (setq ok nil)) ;; break loop
+	 (t
+	  (when (>= *verbosity* 1)
+	    (format t "~&expanding state ~s failed~%" next-state))
+	  (setq ok nil))) ;; break loop
+	)))
+
+(defun find-state-in-graph (state sgraph)
+  (let ((index 0))
+    (loop
+     (when (endp sgraph) (return nil))
+     (when (and (state-contains state (first (car sgraph)))
+		(state-contains (first (car sgraph)) state))
+       (return index))
+     (setq index (+ index 1))
+     (setq sgraph (cdr sgraph))
+     )))
+
+;; Returns a list of the most specific ((partial state) (action))
+;; pairs applicable to state.
+
+(defun apply-policy-to-state (state policy)
+  (let ((cands nil))
+    (dolist (item policy)
+      (if (state-contains state (first item))
+	  (if (not (some #'(lambda (citem)
+			     (state-contains (first item) (first citem)))
+			 cands))
+	      (setq cands
+		    (cons item
+			  (remove-if #'(lambda (citem)
+					 (state-contains (first citem)
+							 (first item)))
+				     cands))))))
+    cands))
+
+
+;; Expand a state using a policy.
+;; Returns a list (ok action successors), where successors is a list
+;; of pairs (probability state). Probabilities should sum to one, but
+;; this is not checked.
+
+(defun expand-state (state policy actions types objects)
+  (let ((cands (apply-policy-to-state state policy)))
+    (cond
+     ((endp cands)
+      (when (>= *verbosity* 1)
+	(format t "~&policy has no action for state ~s~%" state))
+      (list t nil nil))
+     ((> (length cands) 1)
+      (when (>= *verbosity* 1)
+	(format t "~&policy is ambiguous for state ~s~%" state)
+	(dolist (item cands)
+	  (format t "~& ~s -> ~s matches~%" (first item) (second item))))
+      (list nil (mapcar #'second cands) nil))
+     (t
+      (when (>= *verbosity* 2)
+	(format t "~&applying action ~s~%" (second (first cands))))
+      (let* ((action (second (first cands)))
+	     (ea (check-action action state actions types objects)))
+	(cond
+	 ((not (first ea))
+	  (when (>= *verbosity* 1)
+	    (format t "~&action ~s is undefined or inapplicable in state ~s~%" action state))
+	  (list nil action nil))
+	 (t (list t action
+		  (apply-probabilistic-action (cons action ea) state))))
+	))
+     )))
+
+
+;; Apply the propositional effects of a probabilistic action to a state
+;; (fluent effects are ignored).
+;; ea is the list (action ok read add del abs rel); probabilistic
+;; effects appear in add.
+;; Returns a list of (probability state) pairs.
+
+(defun apply-probabilistic-action (ea state)
+  (mapcar #'(lambda (oc)
+	      (list (car oc)
+		    (apply-effects
+		     (list (list (first ea) t nil (second oc) (third oc)
+				 nil nil nil))
+		     state)))
+	  (outcomes (fourth ea) nil (fifth ea))))
+
+
+;; Compute outcomes of a list
+;; adds-and-prob is a list that may contain probabilistic and atomic
+;; add effects. It is assumed that the effects contained in probabilistic
+;; cases are non-conditional and non-quantified (though they may be
+;; conjunctive).
+;; adds is a list of atomic (unconditional) add effects.
+;; dels is a list of atomic delete effects.
+;; Returns a list of outcomes (probability add del), where add and del
+;; are lists of atomic add/delete effects.
+
+(defun outcomes (adds-and-prob adds dels)
+  (cond ((endp adds-and-prob)
+	 (list (list 1 adds dels)))
+	((eq (caar adds-and-prob) 'probabilistic)
+	 (do ((cases (cdar adds-and-prob) (cddr cases))
+	      (ocs nil))
+	     ((endp cases) ocs)
+	     (let* ((prob (car cases))
+		    ;; collect-effects returns (ok read add del abs rel)
+		    (peff (collect-effects
+			   (cadr cases) t nil nil nil nil nil nil nil nil))
+		    (case-ocs (outcomes (cdr adds-and-prob)
+					(append (third peff) adds)
+					(append (fourth peff) dels)))
+		    )
+	       (setq ocs
+		     (append ocs (mapcar #'(lambda (oc)
+					     (cons (* prob (car oc)) (cdr oc)))
+					 case-ocs)))
+	       )))
+	(t (outcomes (cdr adds-and-prob)
+		     (cons (car adds-and-prob) adds)
+		     dels))
+	))
+
+
+;; Trivial implementation of (partial) state implication (non-strict).
+
+(defun state-contains (state pstate)
+  (cond ((endp pstate) t)
+	((find (car pstate) state :test #'equal)
+	 (state-contains state (cdr pstate)))
+	(t nil)))
+
 ;; force update of symbol completion table on load
-;; (eval-when (:load-toplevel)
-;;   (if (find-package "ECL-READLINE")
-;;       (let ((return-to-package *package*))
-;; 	(in-package "ECL-READLINE")
-;; 	(setq *current-package* nil)
-;; 	(in-package return-to-package))))
+(eval-when (:load-toplevel)
+  (if (find-package "ECL-READLINE")
+      (let ((return-to-package *package*))
+	(in-package "ECL-READLINE")
+	(setq *current-package* nil)
+	(in-package return-to-package))))

@@ -52,3 +52,9 @@ This package also includes a set of other PDDL tools:
   PDDL representation. Instead (and unlike the FD translator), it preserves
   any object fluents (i.e., SAS+ variables) in the PDDL input. This means
   that it gives you full control over the generated SAS+ representation.
+
+* `vapo` is a validator (of sorts) for fully-observable probabilistic
+  planning policies. It doesn't actually validate that the policy
+  reaches the goal, but it generates a graph (in dot format) of the
+  state space reachable under a policy, with nodes (states) labelled
+  by the policy action.
