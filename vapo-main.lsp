@@ -3,6 +3,7 @@
   (cdr (ext:command-args)))
 
 (defvar *policy* nil)
+(defvar *expand-goal-states* nil)
 
 (defun print-state-graph (sgraph)
   (format t "~&digraph policy {~%")
@@ -43,6 +44,8 @@
 	     (setq *verbosity* (+ *verbosity* 1)))
 	    ((equal arg "-q")
 	     (setq *verbosity* 0))
+	    ((equal arg "-xg")
+	     (setq *expand-goal-states* t))
 	    ((= (length rem-arg-list) 1) ;; last arg is policy file
 	     (format t "~&reading policy from ~a...~%" arg)
 	     (let ((contents (read-file arg)))
@@ -56,7 +59,8 @@
     (quit))
   (format t "~&validating policy ~a...~%" (car *policy*))
   (let ((result (validate-policy (cdr *policy*) *init* *goal*
-				 *actions* *types* *objects*)))
+				 *actions* *types* *objects*
+				 :expand-goal-states *expand-goal-states*)))
     (when (not (first result))
       (format t "~&state graph construction failed~%")
       (quit))

@@ -4974,16 +4974,19 @@
 ;; Validation of state-action policy for probabilistic domains
 ;; (experimental).
 
-(defun validate-policy (policy init goal actions types objects)
+(defun validate-policy (policy init goal actions types objects
+			&key (expand-goal-states nil))
   ;; may need to do some setup/cleanup (e.g., remove fluents from
   ;; init?)
   (when (not (member 'probabilistic *quoted-argument-predicates*))
     (setq *quoted-argument-predicates*
 	  (cons 'probabilistic *quoted-argument-predicates*)))
-  (build-state-graph policy init goal actions types objects)
+  (build-state-graph policy init goal actions types objects
+		     :expand-goal-states expand-goal-states)
   )
 
-(defun build-state-graph (policy init goal actions types objects)
+(defun build-state-graph (policy init goal actions types objects
+			  &key (expand-goal-states nil))
   (do (;; the state graph is a list of (state action transitions)
        ;; lists; transitions is a list of (probability index) pairs.
        (sgraph (list (list init nil nil nil)))
@@ -4995,10 +4998,22 @@
 	      (car queue) (length sgraph) (length queue))
       (let* ((next-state (first (nth (car queue) sgraph)))
 	     (goal-eval (eval-formula goal nil next-state types objects))
-	     (result (expand-state next-state policy actions types objects))
-	     (exp-ok (first result))
-	     (exp-action (second result))
-	     (exp-succs (third result))
+	     (result
+	      (if (and (first goal-eval) (second goal-eval)
+		       (not expand-goal-states)) nil
+		(expand-state next-state policy actions types objects)))
+	     (exp-ok
+	      (if (and (first goal-eval) (second goal-eval)
+		       (not expand-goal-states)) t
+		(first result)))
+	     (exp-action
+	      (if (and (first goal-eval) (second goal-eval)
+		       (not expand-goal-states)) nil
+		(second result)))
+	     (exp-succs
+	      (if (and (first goal-eval) (second goal-eval)
+		       (not expand-goal-states)) nil
+		(third result)))
 	     (trans nil))
 	(cond
 	 ;; state expansion ok, goal formula is well-defined
@@ -5011,19 +5026,19 @@
 		      (nconc sgraph (list (list (second ps) nil nil nil))))
 		(setq index (- (length sgraph) 1))
 		(setq queue (nconc queue (list index))))
-	      (setq trans (nconc trans (list (list (first ps) index))))
-	      (setf (second (nth (car queue) sgraph)) exp-action)
-	      (setf (third (nth (car queue) sgraph)) trans)
-	      (setf (fourth (nth (car queue) sgraph)) (first goal-eval))
-	      ))
+	      (setq trans (nconc trans (list (list (first ps) index))))))
+	  (setf (second (nth (car queue) sgraph)) exp-action)
+	  (setf (third (nth (car queue) sgraph)) trans)
+	  (setf (fourth (nth (car queue) sgraph)) (first goal-eval))
 	  (setq queue (cdr queue)))
 	 ((not (second goal-eval))
 	  (when (>= *verbosity* 1)
-	    (format t "~&goal formula ~s undefined in ~s~%" goal next-state))
+	    (format t "~&goal formula ~s undefined in state~%~s~%"
+		    goal next-state))
 	  (setq ok nil)) ;; break loop
 	 (t
 	  (when (>= *verbosity* 1)
-	    (format t "~&expanding state ~s failed~%" next-state))
+	    (format t "~&expanding state:~%~s~%failed~%" next-state))
 	  (setq ok nil))) ;; break loop
 	)))
 
@@ -5083,7 +5098,7 @@
 	(cond
 	 ((not (first ea))
 	  (when (>= *verbosity* 1)
-	    (format t "~&action ~s is undefined or inapplicable in state ~s~%" action state))
+	    (format t "~&action ~s is undefined or inapplicable in state:~%~s~%" action state))
 	  (list nil action nil))
 	 (t (list t action
 		  (apply-probabilistic-action (cons action ea) state))))
@@ -5152,9 +5167,9 @@
 	(t nil)))
 
 ;; force update of symbol completion table on load
-(eval-when (:load-toplevel)
-  (if (find-package "ECL-READLINE")
-      (let ((return-to-package *package*))
-	(in-package "ECL-READLINE")
-	(setq *current-package* nil)
-	(in-package return-to-package))))
+;; (eval-when (:load-toplevel)
+;;   (if (find-package "ECL-READLINE")
+;;       (let ((return-to-package *package*))
+;; 	(in-package "ECL-READLINE")
+;; 	(setq *current-package* nil)
+;; 	(in-package return-to-package))))
