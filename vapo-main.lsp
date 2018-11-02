@@ -4,6 +4,7 @@
 
 (defvar *policy* nil)
 (defvar *expand-goal-states* nil)
+(defvar *exact-policy-match* nil)
 
 (defun print-state-graph (sgraph)
   (format t "~&state graph~%")
@@ -40,9 +41,13 @@
 	  (translist (third (nth index sgraph)))
 	  (is-goal (fourth (nth index sgraph))))
       (dolist (trans translist)
-	(format t "  S~a -> S~a [label=\"~a\"];~%"
-		index (second trans) (first trans)))))
-  (format t "~&}~%")
+	(if (not (eql (first trans) 1))
+	    (format t "  S~a -> S~a [label=\"~a\"];~%"
+		    index (second trans) (first trans))
+	  (format t "  S~a -> S~a;~%"
+		  index (second trans)))
+	)))
+    (format t "~&}~%")
   )
 
 
@@ -58,6 +63,8 @@
 	     (setq *verbosity* 0))
 	    ((equal arg "-xg")
 	     (setq *expand-goal-states* t))
+	    ((equal arg "-e")
+	     (setq *exact-policy-match* t))
 	    ((= (length rem-arg-list) 1) ;; last arg is policy file
 	     (format t "~&reading policy from ~a...~%" arg)
 	     (let ((contents (read-file arg)))
@@ -72,7 +79,8 @@
   (format t "~&validating policy ~a...~%" (car *policy*))
   (let ((result (validate-policy (cdr *policy*) *init* *goal*
 				 *actions* *types* *objects*
-				 :expand-goal-states *expand-goal-states*)))
+				 :expand-goal-states *expand-goal-states*
+				 :exact *exact-policy-match*)))
     (when (not (first result))
       (format t "~&state graph construction failed~%")
       (quit))

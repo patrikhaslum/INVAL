@@ -4988,18 +4988,19 @@
 ;; (experimental).
 
 (defun validate-policy (policy init goal actions types objects
-			&key (expand-goal-states nil))
+			&key (expand-goal-states nil) (exact nil))
   ;; may need to do some setup/cleanup (e.g., remove fluents from
   ;; init?)
   (when (not (member 'probabilistic *quoted-argument-predicates*))
     (setq *quoted-argument-predicates*
 	  (cons 'probabilistic *quoted-argument-predicates*)))
   (build-state-graph policy init goal actions types objects
-		     :expand-goal-states expand-goal-states)
+		     :expand-goal-states expand-goal-states
+		     :exact exact)
   )
 
 (defun build-state-graph (policy init goal actions types objects
-			  &key (expand-goal-states nil))
+			  &key (expand-goal-states nil) (exact nil))
   (do (;; the state graph is a list of (state action transitions)
        ;; lists; transitions is a list of (probability index) pairs.
        (sgraph (list (list init nil nil nil)))
@@ -5014,7 +5015,7 @@
 	     (result
 	      (if (and (first goal-eval) (second goal-eval)
 		       (not expand-goal-states)) nil
-		(expand-state next-state policy actions types objects)))
+		(expand-state next-state policy actions types objects :exact exact)))
 	     (exp-ok
 	      (if (and (first goal-eval) (second goal-eval)
 		       (not expand-goal-states)) t
@@ -5066,21 +5067,45 @@
      (setq sgraph (cdr sgraph))
      )))
 
+;; Returns the list of ((state) (action)) pairs from the policy
+;; that match the given state, using either exact or most specific
+;; partial state matching.
+
+(defun apply-policy-to-state (state policy &key (exact nil))
+  (cond
+   (exact
+    (apply-exact-policy-to-state state policy))
+   (t
+    (apply-most-specific-policy-to-state state policy))
+   ))
+
+;; Returns a list of the ((state) (action)) pairs from policy
+;; where the state component matches the given state exactly.
+
+(defun apply-exact-policy-to-state (state policy)
+  (let ((cands nil))
+    (dolist (item policy)
+      (if (and (state-contains state (first item))
+	       (state-contains (first item) state))
+	  (setq cands (cons item cands))))
+    cands))
+
 ;; Returns a list of the most specific ((partial state) (action))
 ;; pairs applicable to state.
 
-(defun apply-policy-to-state (state policy)
+(defun apply-most-specific-policy-to-state (state policy)
   (let ((cands nil))
     (dolist (item policy)
       (if (state-contains state (first item))
 	  (if (not (some #'(lambda (citem)
-			     (state-contains (first item) (first citem)))
+			     (and (state-contains (first item) (first citem))
+				  (not (state-contains (first citem) (first item)))))
 			 cands))
 	      (setq cands
 		    (cons item
 			  (remove-if #'(lambda (citem)
-					 (state-contains (first citem)
-							 (first item)))
+					 (and (state-contains (first citem) (first item))
+					      (not (state-contains (first item) (first citem)))))
 				     cands))))))
     cands))
 
@@ -5090,8 +5115,8 @@
 ;; of pairs (probability state). Probabilities should sum to one, but
 ;; this is not checked.
 
-(defun expand-state (state policy actions types objects)
-  (let ((cands (apply-policy-to-state state policy)))
+(defun expand-state (state policy actions types objects &key (exact nil))
+  (let ((cands (apply-policy-to-state state policy :exact exact)))
     (cond
      ((endp cands)
       (when (>= *verbosity* 1)
@@ -5132,7 +5157,12 @@
 		     (list (list (first ea) t nil (second oc) (third oc)
 				 nil nil nil))
 		     state)))
-	  (outcomes (fourth ea) nil (fifth ea))))
+	  (let ((oc (outcomes (fourth ea) nil (fifth ea))))
+	    (when (>= *verbosity* 3)
+	      (format t "~&effect ~a, ~a translated into outcomes:~%~a~%"
+		      (fourth ea) (fifth ea) oc))
+	    oc)
+	  ))
 
 
 ;; Compute outcomes of a list
