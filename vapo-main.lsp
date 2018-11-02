@@ -5,6 +5,18 @@
 (defvar *policy* nil)
 
 (defun print-state-graph (sgraph)
+  (format t "~&state graph~%")
+  ;; print nodes
+  (dotimes (index (length sgraph))
+    (let ((state (first (nth index sgraph)))
+	  (action (second (nth index sgraph)))
+	  (trans (third (nth index sgraph)))
+	  (is-goal (fourth (nth index sgraph))))
+      (format t "~&~a state: ~a~%  goal? ~a~%  action: ~a~%  transitions: ~a~%"
+	      index state is-goal action trans)
+      )))
+
+(defun print-DOT (sgraph)
   (format t "~&digraph policy {~%")
   ;; print nodes
   (dotimes (index (length sgraph))
@@ -60,8 +72,8 @@
     (when (not (first result))
       (format t "~&state graph construction failed~%")
       (quit))
-    (format t "~&state graph:~%~s~%" (second result))
     (print-state-graph (second result))
+    (print-DOT (second result))
     ))
 
 ;; Call main function inside an error handler.
