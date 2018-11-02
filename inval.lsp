@@ -2830,6 +2830,19 @@
    ((eq (first eff) 'and)
     (type-check-effect-list (rest eff) context predicates functions
 		       types objects where))
+   ;; probabilistic
+   ((eq (car eff) 'probabilistic)
+    (cond
+     ((and (>= (length (cdr eff)) 2) (= (mod (length (cdr eff)) 2) 0))
+      (do ((rem (cdr eff) (cddr rem))
+	   (ok t))
+	  ((endp rem) ok)
+	  (when (not (type-check-effect (second rem) context predicates functions
+					types objects where))
+	    (setq ok nil))
+	  ))
+     (t (format t "~&~s: ill-formed effect ~s~%" where eff) nil)
+     ))
    ;; quantified
    ((eq (car eff) 'forall)
     (cond
