@@ -23,9 +23,10 @@
   (format t "  S~a [shape=rectangle,peripheries=~a,label=\"S~a~a~a\"];~%"
 	  index (if is-goal 2 1) index
 	  (if state-dec ": " "")
-	  (cond ((eq state-dec 'action) action)
-		((eq state-dec 'state) state)
-		(t ""))))
+	  (cond ((equal state-dec "action") action)
+		((equal state-dec "state") state)
+		(t "")
+		)))
 		 
 
 (defun print-DOT (sgraph &key (state-dec nil))
