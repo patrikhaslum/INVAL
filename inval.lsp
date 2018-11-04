@@ -4988,7 +4988,8 @@
 ;; (experimental).
 
 (defun validate-policy (policy init goal actions types objects
-			&key (expand-goal-states nil) (exact nil))
+			&key (expand-goal-states nil) (exact nil)
+			(predicates-to-ignore nil))
   ;; may need to do some setup/cleanup (e.g., remove fluents from
   ;; init?)
   (when (not (member 'probabilistic *quoted-argument-predicates*))
@@ -4996,11 +4997,13 @@
 	  (cons 'probabilistic *quoted-argument-predicates*)))
   (build-state-graph policy init goal actions types objects
 		     :expand-goal-states expand-goal-states
-		     :exact exact)
+		     :exact exact
+		     :predicates-to-ignore predicates-to-ignore)
   )
 
 (defun build-state-graph (policy init goal actions types objects
-			  &key (expand-goal-states nil) (exact nil))
+			  &key (expand-goal-states nil) (exact nil)
+			  (predicates-to-ignore nil))
   (do (;; the state graph is a list of (state action transitions)
        ;; lists; transitions is a list of (probability index) pairs.
        (sgraph (list (list init nil nil nil)))
@@ -5015,7 +5018,9 @@
 	     (result
 	      (if (and (first goal-eval) (second goal-eval)
 		       (not expand-goal-states)) nil
-		(expand-state next-state policy actions types objects :exact exact)))
+		(expand-state next-state policy actions types objects
+			      :exact exact
+			      :predicates-to-ignore predicates-to-ignore)))
 	     (exp-ok
 	      (if (and (first goal-eval) (second goal-eval)
 		       (not expand-goal-states)) t
@@ -5029,31 +5034,30 @@
 		       (not expand-goal-states)) nil
 		(third result)))
 	     (trans nil))
-	(cond
-	 ;; state expansion ok, goal formula is well-defined
-	 ((and exp-ok (second goal-eval))
-	  (dolist (ps exp-succs)
-	    (let ((index (find-state-in-graph (second ps) sgraph)))
-	      (when (null index)
-		;; state is new
-		(setq sgraph
-		      (nconc sgraph (list (list (second ps) nil nil nil))))
-		(setq index (- (length sgraph) 1))
-		(setq queue (nconc queue (list index))))
-	      (setq trans (nconc trans (list (list (first ps) index))))))
-	  (setf (second (nth (car queue) sgraph)) exp-action)
-	  (setf (third (nth (car queue) sgraph)) trans)
-	  (setf (fourth (nth (car queue) sgraph)) (first goal-eval))
-	  (setq queue (cdr queue)))
-	 ((not (second goal-eval))
+	;; update graph with result of expansion, even if it failed
+	(dolist (ps exp-succs)
+	  (let ((index (find-state-in-graph (second ps) sgraph)))
+	    (when (null index)
+	      ;; state is new
+	      (setq sgraph
+		    (nconc sgraph (list (list (second ps) nil nil nil))))
+	      (setq index (- (length sgraph) 1))
+	      (setq queue (nconc queue (list index))))
+	    (setq trans (nconc trans (list (list (first ps) index))))))
+	(setf (second (nth (car queue) sgraph)) exp-action)
+	(setf (third (nth (car queue) sgraph)) trans)
+	(setf (fourth (nth (car queue) sgraph))
+	      (and (first goal-eval) (second goal-eval)))
+	(setq queue (cdr queue))
+	(when (not exp-ok)
+	  (when (>= *verbosity* 1)
+	    (format t "~&expanding state:~%~s~%failed~%" next-state))
+	  (setq ok nil)) ;; break loop
+	(when (not (second goal-eval))
 	  (when (>= *verbosity* 1)
 	    (format t "~&goal formula ~s undefined in state~%~s~%"
 		    goal next-state))
 	  (setq ok nil)) ;; break loop
-	 (t
-	  (when (>= *verbosity* 1)
-	    (format t "~&expanding state:~%~s~%failed~%" next-state))
-	  (setq ok nil))) ;; break loop
 	)))
 
 (defun find-state-in-graph (state sgraph)
@@ -5071,10 +5075,15 @@
 ;; that match the given state, using either exact or most specific
 ;; partial state matching.
 
-(defun apply-policy-to-state (state policy &key (exact nil))
+(defun apply-policy-to-state
+    (state policy &key (exact nil) (predicates-to-ignore nil))
   (cond
    (exact
-    (apply-exact-policy-to-state state policy))
+    (apply-exact-policy-to-state
+     (remove-if #'(lambda (atom)
+		    (find (car atom) predicates-to-ignore))
+		state)
+     policy))
    (t
     (apply-most-specific-policy-to-state state policy))
    ))
@@ -5115,8 +5124,12 @@
 ;; of pairs (probability state). Probabilities should sum to one, but
 ;; this is not checked.
 
-(defun expand-state (state policy actions types objects &key (exact nil))
-  (let ((cands (apply-policy-to-state state policy :exact exact)))
+(defun expand-state (state policy actions types objects
+		     &key (exact nil) (predicates-to-ignore nil))
+  (let ((cands (apply-policy-to-state
+		state policy
+		:exact exact
+		:predicates-to-ignore predicates-to-ignore)))
     (cond
      ((endp cands)
       (when (>= *verbosity* 1)
