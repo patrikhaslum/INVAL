@@ -1,4 +1,6 @@
 
+(defvar *name-concat-separator* '_)
+
 ;; Transform domain and problem to "simple ADL". Arguments:
 ;;  requirements: list of requirements for new domain definition.
 ;;  domain-name, problem-name: duh.
@@ -26,11 +28,15 @@
 	 (static-fun
 	  (collect-static-functions functions actions))
 	 (new-actions
-	  (mapflat #'(lambda (act)
-		       (simplify-action
-			act static-pred static-fun init types objects
-			:ground-all-parameters ground-all-parameters))
-		   actions))
+	  (progn
+	    (when (>= *verbosity* 1)
+	      (format t "~&static predicates: ~a~%static functions: ~a~%"
+		      static-pred static-fun))
+	    (mapflat #'(lambda (act)
+			 (simplify-action
+			  act static-pred static-fun init types objects
+			  :ground-all-parameters ground-all-parameters))
+		     actions)))
 	 (new-axioms
 	  (mapflat #'(lambda (axiom)
 		       (simplify-axiom
@@ -195,8 +201,9 @@
 
 (defun make-pg-action-name (act binds counter rename)
   (if rename
-      (symnumcat (cons (car act) (append (make-name-suffix '- binds)
-					 (if counter (list '- counter) nil))))
+      (symnumcat (cons (car act)
+		       (append (make-name-suffix *name-concat-separator* binds)
+			       (if counter (list *name-concat-separator* 'I counter) nil))))
     (cons (car act)
 	  (sublis binds (mapcar #'car (assoc-val ':parameters (cdr act)))))))
 
@@ -486,6 +493,7 @@
       (error "ill-formed effect formula: ~s~%" eff))
     (let ((scond (simplify-formula (second eff) static-pred static-fun facts))
 	  (seff (simplify-effect (third eff) static-pred static-fun facts)))
+      ;; (format t "~&simplify effect ~a:~% scond = ~a~% seff = ~a~%" eff scond seff)
       (cond
        ((some #'null seff) (list nil))
        ((null scond) nil)
