@@ -196,7 +196,7 @@
 (defun make-pg-action-name (act binds counter rename)
   (if rename
       (symnumcat (cons (car act) (append (make-name-suffix '- binds)
-					 (if counter (list counter) nil))))
+					 (if counter (list '- counter) nil))))
     (cons (car act)
 	  (sublis binds (mapcar #'car (assoc-val ':parameters (cdr act)))))))
 
@@ -474,6 +474,13 @@
     (mapflat #'(lambda (e1)
 		 (simplify-effect e1 static-pred static-fun facts))
 	     (cdr eff)))
+   ((eq (car eff) 'probabilistic)
+    (list (cons 'probabilistic
+		(mapcar #'(lambda (peff)
+			    (if (numberp peff) peff
+			      (cons 'and (simplify-effect
+					  peff static-pred static-fun facts))))
+			(cdr eff)))))
    ((eq (car eff) 'when)
     (when (not (= (length eff) 3))
       (error "ill-formed effect formula: ~s~%" eff))
@@ -671,6 +678,11 @@
 	((or (eq (car form) 'and) (eq (car form) 'or) (eq (car form) 'imply))
 	 (remove-duplicates
 	  (mapflat #'collect-predicates (cdr form))))
+	((eq (car form) 'probabilistic)
+	 (do ((rem-cases (cdr form) (cddr rem-cases))
+	      (preds nil))
+	     ((endp rem-cases) preds)
+	     (setq preds (union preds (collect-predicates (cadr rem-cases))))))
 	((or (eq (car form) 'forall) (eq (car form) 'exists))
 	 (collect-predicates (third form)))
 	((eq (car form) 'not)

@@ -29,6 +29,7 @@
 (setq *input-files* nil)
 (setq *domain-name-prefix* "domain-")
 (setq *problem-name-prefix* "simplified-")
+(setq *single-output-file* nil)
 
 (defun print-help ()
   (format t "~&simplify [options] <domain> <problem>~%")
@@ -75,6 +76,8 @@
 		 (quit))
 	       (setq *problem-name-prefix* (car (cdr rem-arg-list)))
 	       (setq rem-arg-list (cdr rem-arg-list)))
+	      ((equal arg "-1")
+	       (setq *single-output-file* t))
 	      (t (setq *input-files* (append *input-files* (list arg))))
 	      )))
   (when (endp *input-files*) (print-help))
@@ -138,12 +141,17 @@
 	   (concatenate 'string	"simplified-"
 			(pathname-name (nth (- (length *input-files*) 1)
 					    *input-files*)) ".pddl")))
-      (format t "~&writing domain to ~a...~%" new-domain-file)
-      (write-PDDL new-domain-file new-domain)
-      (when new-problem
-	(format t "~&writing problem to ~a...~%" new-problem-file)
-	(write-PDDL new-problem-file new-problem))
-      )))
+      (cond
+       (*single-output-file*
+	(format t "~&writing domain and problem to ~a...~%" new-problem-file)
+	(write-PDDL new-problem-file new-domain new-problem))
+       (t
+	(format t "~&writing domain to ~a...~%" new-domain-file)
+	(write-PDDL new-domain-file new-domain)
+	(when new-problem
+	  (format t "~&writing problem to ~a...~%" new-problem-file)
+	  (write-PDDL new-problem-file new-problem)))
+       ))))
 
 ;; Call main function inside an error handler.
 
