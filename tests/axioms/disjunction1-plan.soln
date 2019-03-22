@@ -1,0 +1,5 @@
+
+;; This is not a "plan", since the problem has no solution. It's just
+;; an action sequence (with one action) to test validators with.
+
+(set-p bottom)

@@ -1,0 +1,5 @@
+(block n1)
+(move n0 n10)
+(block n11)
+(move n10 n0)
+(block n2)
