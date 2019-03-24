@@ -1,3 +1,4 @@
+;; an invalid plan (follows, more or less, the script of the play)
 
 (request-has Iago Iago handkerchief)
 (goto Emilia bedroom garden)
