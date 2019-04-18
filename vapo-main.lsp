@@ -122,7 +122,8 @@
 (defun count-test-actions (sgel)
   (let ((action (second sgel)))
     (if action
-	(if (string-equal (subseq (symbol-name (car action)) 0 5) "TEST_") 1 0)
+	(if (and (> (length (symbol-name (car action))) 8)
+		 (string-equal (subseq (symbol-name (car action)) 0 8) "DO_TEST_")) 1 0)
       0)))
 
 (defun count-exp (sgraph index stack cfun)
