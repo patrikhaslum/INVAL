@@ -779,10 +779,10 @@
        ((eq (car exp) 'find-predicate-arguments)
 	(let ((res (find-predicate-arguments
 		    (second exp) (third exp) (fourth exp) (fifth exp)
-		    (first ss))))
+		    state)))
 	  (format stream "~a" res)))
        (t
-	(let ((res (eval-term exp nil (first ss))))
+	(let ((res (eval-term exp nil state)))
 	  (format stream "~a" (car res))))
        ))
     (format stream "    </td>~%")
@@ -795,8 +795,8 @@
     (format result "~&<table border=\"1\">~%")
     (format result "  <tr>~%  <td align=\"center\"><i>Action</i></td>~%")
     (dolist (col cols)
-      (format result "    <td align=\"center\"><i>~a</i></td>~%  </tr>~%" (first col))
-      )
+      (format result "    <td align=\"center\"><i>~a</i></td>~%" (first col)))
+    (format result "  </tr>~%")
     ;; initial state
     (format result "  <tr>~%    <td>Initial state</td>~%")
     (print-custom-table-row result cols (first ss))
@@ -807,7 +807,7 @@
 	((endp rem-plan) t)
       (format result "  <tr>~%    <td><tt>~a</tt></td>~%"
 	      (car rem-plan))
-      (print-state-html result cols (car rem-ss))
+      (print-custom-table-row result cols (car rem-ss))
       (format result "  <tr>~%"))
     ;; end table
     (format result "~&</table>~%")
@@ -818,7 +818,7 @@
 (defun visualise-numeric-hbw (plan ss)
   (let ((cyls (objects-of-type 'cylinder *types* *objects*)))
     (cond
-     ((= (length cyls) 3)
+     ((equal cyls '(c0 c1 c2))
       (visualise-custom-table
        '(((in c0) (find-predicate-arguments in (1) (2) (c0)))
 	 ((h c0) (+ (* (/ 1 (total_area)) (volume))
