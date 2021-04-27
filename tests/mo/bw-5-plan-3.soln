@@ -1,0 +1,5 @@
+(movetotable b2 b1)
+(movefromtable b5 b1)
+(movetoblock b4 b3 b5)
+(movefromtable b3 b2)
+(movetoblock b4 b5 b3)

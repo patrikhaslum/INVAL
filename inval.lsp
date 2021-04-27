@@ -320,6 +320,12 @@
 ;; deleted.
 (defvar *duplicated-predicates* nil)
 
+;; Are multiple objectives (:metric expressions) allowed? If yes, each
+;; plan will be evaluated according to all metrics, producing a list of
+;; values instead of a single value. Values are still assumed to be
+;; numeric.
+(defvar *multi-objective* nil)
+
 
 ;;;;
 ;; Plan validation
@@ -449,7 +455,11 @@
 		 final-state)))
 	     (metric-val
 	      (if (functionp metric) (list (funcall metric final-state) nil)
-		(eval-term metric nil metric-state))))
+		(if *multi-objective*
+		    (mapcar #'(lambda (mexp)
+				(eval-term mexp nil metric-state))
+			    metric)
+		  (eval-term metric nil metric-state)))))
 	(cond ;; print violation counts if *verbosity* >= 2
 	 ((and (>= *verbosity* 2) pnames)
 	  (format t "~&preference violations: ~%")
@@ -461,15 +471,25 @@
 	(cond
 	 ;; if the metric is a term (PDDL expression), but did not eval to
 	 ;; a number, this is validation error:
-	 ((and (not (functionp metric)) (not (numberp (first metric-val))))
+	 ((and (not (functionp metric))
+	       (or (not *multi-objective*)
+		   (some #'(lambda (mval)
+			     (not (numberp (first mval)))) metric-val))
+	       (not (numberp (first metric-val))))
 	  (if (>= *verbosity* 1)
 	      (format t "~&error: undefined/non-numeric value ~s of metric ~s~%"
 		      metric-val metric))
 	  (list nil nil vres))
 	 ;; otherwise, everything is fine!!
 	 (t (if (>= *verbosity* 1)
-		(format t "~&plan valid!~%metric value: ~a~%" (car metric-val)))
-	    (list t (car metric-val) vres))
+		(format t "~&plan valid!~%metric value: ~a~%"
+			(if *multi-objective*
+			    (mapcar #'car metric-val)
+			    (car metric-val))
+			  ))
+	    (list t (if *multi-objective*
+			(mapcar #'car metric-val)
+		      (car metric-val)) vres))
 	 )))
      ;; no metric defined, so just return success and vres
      (t (if (>= *verbosity* 1)
@@ -3101,14 +3121,16 @@
 		  ':constraints))
 	    (setq ok nil))
 	(if *metric*
-	    (let ((mt (type-check-term
-		       *metric* nil *predicates* *functions* *types* *objects*
-		       ':metric :is-metric t)))
-	      (cond ((null mt)
-		     (setq ok nil))
-		    ((not (eq mt 'number))
-		     (format t "~&:metric type is ~s (should be number)~%" mt)
-		     (setq ok nil)))))
+	    (dolist (mterm (if *multi-objective* *metric* (list *metric*)))
+	      (let ((mt (type-check-term
+			 mterm nil *predicates* *functions* *types* *objects*
+			 ':metric :is-metric t)))
+		(cond ((null mt)
+		       (setq ok nil))
+		      ((not (eq mt 'number))
+		       (format t "~&:metric ~s type is ~s (should be number)~%"
+			       mterm mt)
+		       (setq ok nil))))))
 	ok)
     ;; error in type hierarchy, return nil
     nil))
@@ -3425,11 +3447,25 @@
 	 (setq *constraints*
 	       (merge-conjunctions *constraints* (second element))))
 	((eq (first element) ':metric)
-	 (if *metric* (error "multiple :metric definitions in ~s" filename))
+	 (if (and *metric* (not *multi-objective*))
+	     (error "multiple :metric definitions in ~s" filename))
 	 (if (< (length (rest element)) 2)
 	     (error "malformed :metric ~s" element))
-	 (setq *metric-type* (first (rest element)))
-	 (setq *metric* (second (rest element))))
+	 (if *multi-objective* ;; if this is an MO-problem...
+	     (if *metric-type* ;; if metric-type is already a list
+		 (setq *metric-type* ;; append the next metric's type
+		       (append *metric-type* (list (first (rest element)))))
+	       (setq *metric-type* ;; else make a list of one element
+		     (list (first (rest element)))))
+	   (setq *metric-type* (first (rest element)))) ;; if not MO
+	 (if *multi-objective* ;; if this is an MO-problem...
+	     (if *metric*
+		 (setq *metric*
+		       (append *metric* (list (second (rest element)))))
+	       (setq *metric*
+		     (list (second (rest element)))))
+	   (setq *metric* (second (rest element)))) ;; if not MO
+	 )
 	;; Recognise some custom pddlcat extensions: invariants and sets:
 	((eq (first element) ':invariant)
 	 (setq *invariants*

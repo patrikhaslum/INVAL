@@ -47,6 +47,13 @@ PDDL3.1, i.e., using object fluents. Also an additional example
 These tests are mainly intended for the `rsk` (reverse Skolemisation)
 transformation.
 
+## Directory `mo/`
+
+Examples of multi-objective planning. Problem files in this set define
+more than one :metric, but are otherwise standard (the metrics defined
+are also the same as in standard PDDL). Running inval with option -mo
+enables validation of multi-objective problems.
+
 ## Directory `typing/`
 
 Example problems to illustrate some areas of confusion over the

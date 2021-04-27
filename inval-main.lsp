@@ -265,13 +265,15 @@
 	     (setq *duplicated-predicates* '(fault))
 	     (setq *dddl* t)
 	     (setq *metric* #'collect-faults))
+	    ((equal arg "-mo")
+	     (setq *multi-objective* t))
 	    (t
 	     (format t "~&reading ~a...~%" arg)
 	     (let ((contents (read-file arg)))
 	       (parse-file arg contents))))))
   (when (or (null *metric*) *force-metric-total-time*)
-    (setq *metric* '(total-time))
-    (setq *metric-type* 'minimize))
+    (setq *metric* (if *multi-objective* '((total-time)) '(total-time)))
+    (setq *metric-type* (if *multi-objective* '(minimize) 'minimize)))
   ;; Type-checking:
   (cond (*typecheck*
 	 (setq *axioms*
@@ -355,25 +357,12 @@
 	  (*visualisation*
 	   (print-visualisation t val-res-list))
 	  )
-    ;; If option dddl is set, print a dominance graph:
+    ;; If option dddl or mo is set, print a dominance graph:
     (cond (*dddl*
-	   (format t "~&digraph dominance {~%")
-	   (dolist (val-res val-res-list t)
-	     (cond ((second val-res)
-		    (format t "~& ~a [label=\"~a\"];~%"
-			    (first (first val-res))
-			    (first (first val-res))))))
-	   (dolist (val-res-1 val-res-list t)
-	     (dolist (val-res-2 val-res-list t)
-	       (cond ((and (second val-res-1)
-			   (second val-res-2)
-			   (strictly-preferred
-			    (third val-res-1) (third val-res-2)))
-		      (format t "~& ~a -> ~a;~%"
-			      (first (first val-res-1))
-			      (first (first val-res-2)))))))
-	   (format t "~&}~%")
-	   ))
+	   (print-dominance-graph val-res-list #'dddl-strictly-preferred))
+	  (*multi-objective*
+	   (print-dominance-graph val-res-list #'mo-strictly-preferred))
+	  )
     ))
 
 ;; supporting functions for causal link analysis:
@@ -430,6 +419,31 @@
 	  (setq threat-map (add-to-set-map pred (car act) threat-map)))))
     threat-map))
 
+;; print-dominance-graph is used both for MO and DDDL validation
+
+(defun print-dominance-graph (val-res-list pref-fun)
+  (format t "~&digraph dominance {~%")
+  (dolist (val-res val-res-list t)
+    (cond ((second val-res)
+	   (format t "~& ~a [label=\"~a\"];~%"
+		   (first (first val-res))
+		   (first (first val-res))))))
+  (dolist (val-res-1 val-res-list t)
+    (dolist (val-res-2 val-res-list t)
+      (cond ((and (second val-res-1)
+		  (second val-res-2)
+		  (funcall pref-fun (third val-res-1) (third val-res-2)))
+	     (format t "~& ~a -> ~a;~%"
+		     (first (first val-res-1))
+		     (first (first val-res-2)))))))
+  (format t "~&}~%")
+  )
+
+(defun mo-strictly-preferred (v1 v2)
+  (when (not (= (length v1) (length v2)))
+    (error "objective vectors ~s and ~s cannot be compared!" v1 v2))
+  (and (every #'<= v1 v2) (some #'< v1 v2)))
+
 ;; custom DDDL stuff:
 
 (defun collect-faults (state)
@@ -443,15 +457,15 @@
 		     )))))
     fault-count))
 
-(defun preferred (hyp1 hyp2)
+(defun dddl-preferred (hyp1 hyp2)
   (every #'(lambda (fc1)
 	     (let ((fc2 (assoc (car fc1) hyp2 :test #'equal)))
 	       (cond (fc2 (>= (cdr fc2) (cdr fc1)))
 		     (t nil))))
 	 hyp1))
 
-(defun strictly-preferred (hyp1 hyp2)
-  (and (preferred hyp1 hyp2) (not (preferred hyp2 hyp1))))
+(defun dddl-strictly-preferred (hyp1 hyp2)
+  (and (dddl-preferred hyp1 hyp2) (not (dddl-preferred hyp2 hyp1))))
 
 
 ;; Call main function inside an error handler.
