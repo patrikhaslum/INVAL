@@ -18,7 +18,11 @@
   
   (:goal (and (on B3 B2) (on B4 B3) (on B5 B1)))
 
-  (:metric minimize (moves-to-table))
-  (:metric minimize (moves-to-block))
-  (:metric minimize (total-moves))
+  ;; simplified syntax (all metrics must have the same direction)
+  (:metric minimize (moves-to-table) (moves-to-block) (total-moves))
+
+  ;; general syntax (can mix minimize and maximize)
+  ;; (:metric minimize (moves-to-table))
+  ;; (:metric minimize (moves-to-block))
+  ;; (:metric minimize (total-moves))
   )

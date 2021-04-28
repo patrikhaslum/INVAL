@@ -3448,22 +3448,27 @@
 	       (merge-conjunctions *constraints* (second element))))
 	((eq (first element) ':metric)
 	 (if (and *metric* (not *multi-objective*))
-	     (error "multiple :metric definitions in ~s" filename))
+	     (error "multiple :metric definitions in ~s (and *multi-objective* not enabled)" filename))
 	 (if (< (length (rest element)) 2)
 	     (error "malformed :metric ~s" element))
+	 (if (and (> (length (rest element)) 2) (not *multi-objective*))
+	     (error "multiple expressions in :metric ~s (and *multi-objective* not enabled)" element))
 	 (if *multi-objective* ;; if this is an MO-problem...
 	     (if *metric-type* ;; if metric-type is already a list
 		 (setq *metric-type* ;; append the next metric's type
-		       (append *metric-type* (list (first (rest element)))))
+		       (append *metric-type*
+			       (ncopies (first (rest element))
+					(length (rest (rest element))))))
 	       (setq *metric-type* ;; else make a list of one element
-		     (list (first (rest element)))))
+		     (ncopies (first (rest element))
+			      (length (rest (rest element))))))
 	   (setq *metric-type* (first (rest element)))) ;; if not MO
 	 (if *multi-objective* ;; if this is an MO-problem...
 	     (if *metric*
 		 (setq *metric*
-		       (append *metric* (list (second (rest element)))))
+		       (append *metric* (rest (rest element))))
 	       (setq *metric*
-		     (list (second (rest element)))))
+		     (rest (rest element))))
 	   (setq *metric* (second (rest element)))) ;; if not MO
 	 )
 	;; Recognise some custom pddlcat extensions: invariants and sets:
@@ -4093,6 +4098,14 @@
 ;; Append a single element to a list ("end-cons").
 
 (defun econs (l e) (append l (list e)))
+
+;; Return a list of n copies of a given element
+
+(defun ncopies (elem n)
+  (let ((res nil))
+    (dotimes (k n)
+      (setq res (cons elem res)))
+    res))
 
 ;;;;
 ;; Alternative implementation of apply-axioms (fixpoint computation).

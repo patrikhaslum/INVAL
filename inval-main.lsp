@@ -361,7 +361,9 @@
     (cond (*dddl*
 	   (print-dominance-graph val-res-list #'dddl-strictly-preferred))
 	  (*multi-objective*
-	   (print-dominance-graph val-res-list #'mo-strictly-preferred))
+	   (print-dominance-graph
+	    val-res-list #'(lambda (v1 v2)
+			     (mo-strictly-preferred *metric-type* v1 v2))))
 	  )
     ))
 
@@ -439,10 +441,16 @@
   (format t "~&}~%")
   )
 
-(defun mo-strictly-preferred (v1 v2)
-  (when (not (= (length v1) (length v2)))
-    (error "objective vectors ~s and ~s cannot be compared!" v1 v2))
-  (and (every #'<= v1 v2) (some #'< v1 v2)))
+(defun mo-strictly-preferred (dirs v1 v2)
+  (when (or (not (= (length v1) (length v2)))
+	    (not (= (length dirs) (length v1))))
+    (error "objective vectors ~s, ~s and ~s cannot be compared!" dirs v1 v2))
+  (and (every #'(lambda (d a b)
+		  (if (eq d 'maximize) (>= a b) (<= a b)))
+	      dirs v1 v2)
+       (some #'(lambda (d a b)
+		 (if (eq d 'maximize) (> a b) (< a b)))
+	     dirs v1 v2)))
 
 ;; custom DDDL stuff:
 
