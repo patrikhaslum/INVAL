@@ -3,8 +3,9 @@
 (defvar *name-FDR-variable-by-atom-name* t)
 
 ;; Force translator to output a problem with/without metric spec; if
-;; neither option is in effect, the problem will be considered to be
-;; metric iff there is an initialisation of the fluent (total-cost).
+;; neither option is in effect, the output problem will be metric iff
+;; a :metric is specified. Note: forcing a non-metric problem to be
+;; metric will result in all actions having zero cost.
 (defvar *force-metric* nil)
 (defvar *force-non-metric* nil)
 
@@ -36,7 +37,6 @@
 ;; Write a grounded and simplified problem in Fast Downward's FDR format
 ;; version 3 (i.e., the "output.sas" file).
 ;;  stream - output stream to write to;
-;;  is-metric - t/nil;
 ;;  fluents - list of pairs (ground fluent . domain);
 ;;  atoms - list of ground atoms;
 ;;  stratified-dps - stratified list of derived predicate names, i.e.,
@@ -49,10 +49,12 @@
 (defun output-FDR-v3
   (stream fluents atoms stratified-dps simple-actions simple-axioms init goal)
   (let ((var-index (make-variable-index fluents atoms))
-	(is-metric (cond (*force-metric* t)
-			 (*force-non-metric* nil)
-			 ((find-fluent-value '(total-cost) init) t)
-			 (t nil))))
+	;; metric will be either the metric expression or nil
+	;; (to indicate a non-metric problem).
+	(metric (cond (*force-non-metric* nil)
+		      (*metric* *metric*)
+		      (*force-metric* 0)
+		      (t nil))))
     (when (>= *verbosity* 2)
       (format t "variable index:~%")
       (dolist (var var-index)
@@ -60,7 +62,7 @@
     ;; version section
     (format stream "begin_version~%~a~%end_version~%" 3)
     ;; metric section
-    (format stream "begin_metric~%~a~%end_metric~%" (if is-metric 1 0))
+    (format stream "begin_metric~%~a~%end_metric~%" (if metric 1 0))
     ;; variables section
     (format stream "~a~%" (length var-index))
     (dolist (var var-index)
@@ -120,7 +122,7 @@
     (dolist (act simple-actions)
       (when (>= *verbosity* 2)
 	(format t "action: ~w~%" act))
-      (output-FDR3-action stream act var-index is-metric init))
+      (output-FDR3-action stream act var-index metric init))
     ;; axiom section
     (format stream "~a~%" (length simple-axioms))
     (dolist (axiom simple-axioms)
@@ -140,7 +142,7 @@
       (format stream "end_rule~%"))
     ))
 
-(defun output-FDR3-action (stream act var-index is-metric init)
+(defun output-FDR3-action (stream act var-index metric init)
   ;; * The first line is "begin_operator".
   ;; * The second line contains the name of the operator. 
   (format stream "begin_operator~%~a" (caar act))
@@ -184,18 +186,56 @@
 			-1) val))))
     ;; action cost
     (format stream "~a~%"
-	    (cond (is-metric
-		   (let ((cost (find-if
-				#'(lambda (eff)
-				    (and (listp eff)
-					 (eq (car eff) 'increase)
-					 (equal (cadr eff) '(total-cost))))
-				(cdr (assoc ':effect (cdr act))))))
-		     (cond (cost (static-eval (caddr cost) init)) (t 0))))
-		  (t 1)))
+	    (if metric (metric-net-effect metric
+					  (cdr (assoc ':effect (cdr act)))
+					  init)
+	      1)
+	    ;; (cond (metric
+	    ;; 	   (let ((cost (find-if
+	    ;; 			#'(lambda (eff)
+	    ;; 			    (and (listp eff)
+	    ;; 				 (eq (car eff) 'increase)
+	    ;; 				 (equal (cadr eff) '(total-cost))))
+	    ;; 			(cdr (assoc ':effect (cdr act))))))
+	    ;; 	     (cond (cost (static-eval (caddr cost) init)) (t 0))))
+	    ;; 	  (t 1))
+	    )
     ) ; end of let
   (format stream "end_operator~%")
   )
+
+(defun metric-net-effect (exp eff init)
+  (cond
+   ((numberp exp) exp)
+   ((assoc (car exp) *builtin-numeric-functions*)
+    (let ((args (mapcar #'(lambda (term)
+			    (metric-net-effect term eff init))
+			(cdr exp)))
+	  (fun (assoc (car exp) *builtin-numeric-functions*)))
+      (when (or (< (length args) (second fun))
+		(and (third fun) (> (length args) (third fun))))
+	(error "incorrect arguments ~a for ~a~%" args fun))
+      (when (some #'(lambda (arg) (not (numberp arg))) args)
+	(error "non-numeric argument ~a for ~a~%" args fun))
+      (funcall (fourth fun) args)))
+   ;; otherwise, it's a (ground) fluent term; now recurse on eff
+   ((null eff) 0)
+   ((eq (car eff) 'and)
+    (reduce #'+ (mapcar #'(lambda (e1)
+			    (metric-net-effect exp e1 init))
+			(cdr eff))))
+   ((eq (car eff) 'when)
+    (let ((delta (metric-net-effect exp (third eff) init)))
+      (if (eq delta 0) 0
+	(error "cannot compute net effect of ~a on ~a~%" eff exp))))
+   ((eq (car eff) 'increase)
+    (if (equal (second eff) exp) (static-eval (third eff) init) 0))
+   ((eq (car eff) 'decrease)
+    (if (equal (second eff) exp) (* -1 (static-eval (third eff) init)) 0))
+   ((eq (car eff) 'assign)
+    (if (not (equal (second eff) exp)) 0
+      (error "cannot compute net effect of ~a on ~a~%" eff exp)))
+   (t 0)))
 
 (defun static-eval (exp init)
   (let ((val (eval-term exp nil init :report-errors nil)))
