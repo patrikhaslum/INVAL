@@ -3271,13 +3271,12 @@
 	 (*readtable* *pddl-readtable*))
      (do ((next-item (read *in-stream* nil 'end-of-file)
 		     (read *in-stream* nil 'end-of-file)))
-	 ;;((eq next-item 'end-of-file) (restore-keywords contents))
 	 ((eq next-item 'end-of-file) contents)
        (setq contents (append contents (list next-item)))
        ))
    ))
 
-(defparameter *pddl-readtable*
+(defun make-special-readtable ()
   (let ((table (copy-readtable)))
     (set-macro-character #\:
                          #'(lambda (stream char)
@@ -3286,22 +3285,11 @@
 				   (let ((kw (assoc next *pddl-keywords*)))
 				     (if kw (cdr kw) next))
 				 next)))
-                         ;; #'(lambda (stream char)
-			 ;;    (declare (ignore stream char))
-			 ;;    'colon)
                          nil table)
     table))
 
-;; (defun restore-keywords (exp)
-;;   (cond ((not (listp exp)) exp)
-;; 	((endp exp) nil)
-;; 	((eq (car exp) 'colon)
-;; 	 (let ((kw (assoc (cadr exp) *pddl-keywords*)))
-;; 	   (cond (kw (cons (cdr kw) (restore-keywords (cddr exp))))
-;; 		 (t (restore-keywords (cdr exp))))))
-;; 	(t (cons (restore-keywords (car exp))
-;; 		 (restore-keywords (cdr exp))))
-;; 	))
+(defparameter *pddl-readtable* (copy-readtable))
+;;(defparameter *pddl-readtable* (make-special-readtable))
 
 ;; Clear current definitions and load one or more files.
 

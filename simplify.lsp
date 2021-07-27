@@ -55,7 +55,7 @@
       (dotimes (i (length new-goal))
 	(push (make-action (symnumcat 'goal-disjunct- (+ i 1))
 			   nil (nth i new-goal) '(goal-achieved))
-	      actions))
+	      new-actions))
       (setq new-goal '(goal-achieved)))
      ((> (length new-goal) 1)
       (setq new-goal (cons 'or new-goal)))
@@ -203,7 +203,7 @@
   (if rename
       (symnumcat (cons (car act)
 		       (append (make-name-suffix *name-concat-separator* binds)
-			       (if counter (list *name-concat-separator* 'I counter) nil))))
+			       (if (> counter 1) (list *name-concat-separator* 'I counter) nil))))
     (cons (car act)
 	  (sublis binds (mapcar #'car (assoc-val ':parameters (cdr act)))))))
 

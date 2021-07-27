@@ -185,7 +185,13 @@
    (cond (reqs (list (cons ':requirements reqs)))
 	 (t nil))
    (cond ((and types (not (eq with-types 'strip)))
-	  (list (cons ':types (make-typed-list types with-types))))
+	  ;; if with-types is not 'force and all type declaration
+	  ;; supertypes are 'object, strip supertypes from type decls
+	  (if (and (not (eq with-types 'force))
+		   (every #'(lambda (td) (eq (cdr td) 'object)) types))
+	      (list (cons ':types (make-typed-list types 'strip)))
+	    ;; otherwise, keep all supertypes
+	    (list (cons ':types (make-typed-list types with-types)))))
 	 (t nil))
    (cond (constants
 	  (list (cons ':constants
@@ -215,15 +221,16 @@
 			     (cons (caar fun)
 				   (make-typed-list (cdar fun) with-types)))
 			 functions))))
-	 (t (list
-	     (cons ':functions
-		   (make-typed-list
-		    (mapcar #'(lambda (fun)
-				(cons (cons (caar fun)
-					    (make-typed-list (cdar fun) with-types))
-				      (cdr fun)))
-			    functions)
-		    with-types)))))
+	 (t
+	  (list
+	   (cons ':functions
+		 (make-typed-list
+		  (mapcar #'(lambda (fun)
+			      (cons (cons (caar fun)
+					  (make-typed-list (cdar fun) with-types))
+				    (cdr fun)))
+			  functions)
+		  with-types)))))
    axioms
    (mapcar #'(lambda (act)
 	       (make-action-definition act :with-types with-types))
