@@ -3288,8 +3288,8 @@
                          nil table)
     table))
 
-(defparameter *pddl-readtable* (copy-readtable))
-;;(defparameter *pddl-readtable* (make-special-readtable))
+;;(defparameter *pddl-readtable* (copy-readtable))
+(defparameter *pddl-readtable* (make-special-readtable))
 
 ;; Clear current definitions and load one or more files.
 

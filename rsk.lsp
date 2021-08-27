@@ -182,8 +182,7 @@
 	&key (with-types nil))
   (append
    (list 'define (list 'domain name))
-   (cond (reqs (list (cons ':requirements reqs)))
-	 (t nil))
+   (if reqs (list (cons ':requirements (mapcar #'colonise-symbol reqs))) nil)
    (cond ((and types (not (eq with-types 'strip)))
 	  ;; if with-types is not 'force and all type declaration
 	  ;; supertypes are 'object, strip supertypes from type decls
@@ -290,6 +289,14 @@
 	 (mapcar #'car typed-list))
 	(t (unparse-typed-list typed-list))
 	))
+
+;; define symbol in package "keyword" unless that's already where it
+;; sits; this will make it print with a leading colon (in some forms
+;; of printing)
+(defun colonise-symbol (sym)
+  (let ((kw-package (find-package "KEYWORD")))
+    (if (eq (symbol-package sym) kw-package) sym
+      (intern (symbol-name sym) kw-package))))
 
 ;; Modify LISP's pretty-printer so that NIL is written as "()" for
 ;; PDDL output. For this to work, format must be called with pretty
