@@ -3327,13 +3327,15 @@
 			  ((eq (car item) ':plan)
 			   (setq plan-count (+ plan-count 1))
 			   (setq *plans*
-				 (cons (parse-plan
-					(concatenate 'string
-						     filename " #"
-						     (prin1-to-string
-						      plan-count))
-					(cdr item))
-				       *plans*)))
+				 (append
+				  *plans*
+				  (list (parse-plan
+					 (concatenate 'string
+						      filename " #"
+						      (prin1-to-string
+						       plan-count))
+					 (cdr item))
+					))))
 			  ;; ignore heuristic definitions
 			  ((eq (car item) ':heuristic) t)
 			  (t (error "unparseable thing ~s in ~s"
@@ -3342,10 +3344,10 @@
 		 ;; if the first element of the list is neither 'define
 		 ;; nor ':plan, it may be an untimed plan file
 		 (t (setq *plans*
-			  (cons (parse-plan filename contents) *plans*)))
+			  (append *plans* (list (parse-plan filename contents)))))
 		 )))
 	;; otherwise, we assume this is a (timed) plan file
-	(t (setq *plans* (cons (parse-plan filename contents) *plans*)))
+	(t (setq *plans* (append *plans* (list (parse-plan filename contents)))))
 	))
 
 (defun parse-definition (filename content)
