@@ -74,7 +74,7 @@
 	    (t (quit))))
     (multiple-value-bind
 	(new-domain declared-constants)
-	(rsk-domain *domain-name* requirements *objects* *types*
+	(rsk-domain *domain-name* *requirements* *objects* *types*
 		    *predicates* *functions* *axioms* *actions*
 		    :target *target* :declare-constants *declare-constants*)
       (let ((new-problem
