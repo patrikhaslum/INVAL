@@ -22,7 +22,8 @@
 	       predicates functions actions axioms init goal
 	       metric-type metric types objects
 	       &key (declare-constants t) (compile-disjunctive-goal nil)
-	       (with-types nil) (ground-all-parameters nil))
+	       (with-types nil) (simplify-effect-rhs nil)
+	       (ground-all-parameters nil))
   (let* ((static-pred
 	  (collect-static-predicates predicates actions axioms))
 	 (static-fun
@@ -35,6 +36,7 @@
 	    (mapflat #'(lambda (act)
 			 (simplify-action
 			  act static-pred static-fun init types objects
+			  :simplify-effect-rhs simplify-effect-rhs
 			  :ground-all-parameters ground-all-parameters))
 		     actions)))
 	 (new-axioms
@@ -124,13 +126,16 @@
 ;; objects - list of object declarations (as in *objects*)
 ;; ground-all-parameters (t/nil) - if true, all action parameters are
 ;;  instantiated.
+;; simplify-effect-rhs (t/nil) - if true, also simplify rhs of increase,
+;;  decrease and assign effects to a constant when possible.
 ;; rename (t/nil) - if false, action names in the return list are
 ;;  (partially) instantiated actions (i.e., list of name plus arguments)
 ;;  rather than symbols.
 ;; Returns: List of partially grounded and simplified actions.
 
 (defun simplify-action (act static-pred static-fun facts types objects
-			    &key (ground-all-parameters nil) (rename t))
+			    &key (ground-all-parameters nil)
+			    (simplify-effect-rhs nil) (rename t))
   (let* ((qf-prec (transform-to-nnf
 		   (instantiate-quantifiers
 		    (assoc-val ':precondition (cdr act)) nil types objects)
@@ -145,7 +150,8 @@
 		 (t (union (find-formula-simplifiers
 			    qf-prec static-pred static-fun)
 			   (find-formula-simplifiers
-			    qf-eff static-pred static-fun)))))
+			    qf-eff static-pred static-fun
+			    :in-expressions simplify-effect-rhs)))))
 	 (gparam (mapcar #'(lambda (var)
 			     (let ((vardecl
 				    (assoc var (assoc-val
@@ -540,9 +546,12 @@
 
 
 ;; Find free variables in a formula whose instantiation would allow
-;; removal of disjunctions.
+;; removal of disjunctions. If in-expressions is true, also find free
+;; variables in static (numeric) expressions in increase/decrease/assign
+;; expressions.
 
-(defun find-formula-simplifiers (form static-pred static-fun)
+(defun find-formula-simplifiers (form static-pred static-fun
+				      &key (in-expressions nil))
   (cond ((null form) nil)
 	((or (eq (car form) 'forall) (eq (car form) 'exists))
 	 (error "find-formula-simplifiers: quantifiers must be removed"))
@@ -556,7 +565,8 @@
 	   (cond ((>= count (- (length (cdr form)) 1)) vars)
 		 (t nil))))
 	((eq (car form) 'when)
-	 (find-formula-simplifiers (second form) static-pred static-fun))
+	 (find-formula-simplifiers (second form) static-pred static-fun
+				   :in-expressions in-expressions))
 	((eq (car form) 'imply)
 	 (cond ((is-static-formula (second form) static-pred static-fun)
 		(free-variables (second form)))
@@ -565,10 +575,16 @@
 	 (reduce #'union
 		 (mapcar #'(lambda (f1)
 			     (find-formula-simplifiers
-			      f1 static-pred static-fun))
+			      f1 static-pred static-fun
+			      :in-expressions in-expressions))
 			 (cdr form))))
 	((eq (car form) 'not)
-	 (find-formula-simplifiers (second form) static-pred static-fun))
+	 (find-formula-simplifiers (second form) static-pred static-fun
+				   :in-expressions in-expressions))
+	((and (member (car form) '(increase decrease assign)) in-expressions)
+	 (cond ((is-static-term (third form) static-fun)
+		(free-variables (third form)))
+	       (t nil)))
 	(t nil)))
 
 (defun is-static-formula (form static-pred static-fun)

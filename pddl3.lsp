@@ -107,8 +107,10 @@
 	(cond
 	 ((null new-effects) (push div-pred new-effects))
 	 (t (let ((div-cond
-		   (cons 'and (mapcar #'(lambda (ce) (list 'not (second ce)))
-				      new-effects))))
+		   (transform-to-nnf
+		    (cons 'and (mapcar #'(lambda (ce) (list 'not (second ce)))
+				       new-effects))
+		    nil)))
 	      (push (list 'when div-cond div-pred) new-effects))))
 	(rplacd act
 		(reassoc ':effect

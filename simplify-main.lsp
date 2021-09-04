@@ -22,6 +22,7 @@
 (setq *declare-constants* t)
 (setq *simplify* t)
 (setq *ground* nil)
+(setq *simplify-effect-rhs* nil)
 (setq *detype* nil)
 (setq *output-types* nil)
 (setq *compile-disjunctive-goal* t)
@@ -30,6 +31,8 @@
 (setq *domain-name-prefix* "domain-")
 (setq *problem-name-prefix* "simplified-")
 (setq *single-output-file* nil)
+
+(setq *multi-objective* t) ;; simply pass MO problems through
 
 (defun print-help ()
   (format t "~&simplify [options] <domain> <problem>~%")
@@ -59,6 +62,8 @@
 	       (setq *simplify* nil))
 	      ((equal arg "-g")
 	       (setq *ground* t))
+	      ((equal arg "-rhs")
+	       (setq *simplify-effect-rhs* t))
 	      ((equal arg "-t")
 	       (setq *detype* t))
 	      ((equal arg "-T")
@@ -101,6 +106,7 @@
 		    :declare-constants *declare-constants*
 		    :compile-disjunctive-goal *compile-disjunctive-goal*
 		    :with-types *output-types*
+		    :simplify-effect-rhs *simplify-effect-rhs*
 		    :ground-all-parameters *ground*)
 	(let ((constants nil))
 	  (when *declare-constants*
