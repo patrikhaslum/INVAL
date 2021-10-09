@@ -179,7 +179,7 @@
 	       ((eq pg-prec t)
 		(list
 		 (make-action
-		  (make-pg-action-name act binds nil rename)
+		  (make-pg-action-name act binds 0 rename)
 		  rparam nil (cons 'and pg-eff-list))))
 	       (t (mapcar #'(lambda (disjunct)
 			      (make-action
