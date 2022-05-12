@@ -50,6 +50,7 @@
 	    (list 'blocksworld #'visualise-bw3 'latex)
 	    (list 'genome-edit-distance #'visualise-ged 'latex)
 	    (list 'sokoban-sequential #'visualise-sokoban-IPC6 'latex)
+	    (list 'sokoban-strips #'visualise-sokoban-IPC6 'latex)
 	    (list 'openstacks-sequencedstrips-ADL #'visualise-openstacks 'latex)
 	    (list 'openstacks-sequencedstrips-nonADL-nonNegated
 		  #'visualise-openstacks 'latex)
@@ -63,6 +64,7 @@
 	 '("\\documentclass[10pt,a4paper]{article}"
 	   "\\usepackage{pgf}"
 	   "\\usepackage{tikz}"
+	   "\\usetikzlibrary{patterns}"
 	   "\\begin{document}"))
 	((eq doctype 'html)
 	 '("<html>"

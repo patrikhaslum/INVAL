@@ -8,6 +8,13 @@
 	  (push atom res)))
     res))
 
+;; return lists of selected argument values that appear for predicate
+;; in state: 'posl is a list of argument positions (starting from 1,
+;; as the predicate name is in position 0); these are the arguments
+;; that will be included in the return. 'keys is also a list of
+;; positions; if not nil, it will be used to filter facts so that only
+;; those where the arguments in those positions equal the given list
+;; 'values are returned.
 (defun find-predicate-arguments (predicate posl keys values state)
   (let ((res nil))
     (dolist (atom state)
@@ -325,31 +332,69 @@
 	    (list (cons seg-off (cons seg-type (cons seg-start seg-args)))))
     ))
 
-(defun calc-bounding-box (slist)
-  (let ((x 0) (y 0) (x-min 0) (y-min 0) (x-max 0) (y-max 0))
-    (dolist (seg slist)
-      (cond ((eq (cadr seg) 'move)
-    	     (dolist (arg (cdddr seg))
-    	       (setq x (+ x (first arg)))
-    	       (setq y (+ y (second arg)))
-    	       (setq x-min (min x x-min))
-    	       (setq x-max (max x x-max))
-    	       (setq y-min (min y y-min))
-    	       (setq y-max (max y y-max))))
-	    ((eq (cadr seg) 'dir-up)
-	     (setq y (+ y (fifth seg)))
-	     (setq y-max (max (+ y 1) y-max)))
-	    ((eq (cadr seg) 'dir-down)
-	     (setq y (+ y (fifth seg)))
-	     (setq y-min (min (- y 1) y-min)))
-	    ((eq (cadr seg) 'dir-right)
-	     (setq x (+ x (fourth seg)))
-	     (setq x-max (max (+ x 1) x-max)))
-	    ((eq (cadr seg) 'dir-left)
-	     (setq x (+ x (fourth seg)))
-	     (setq x-min (min (- x 1) x-min)))
-	    (t (error "invalid segment type: ~a" (cadr seg)))
-	    ))
+(defun get-sokoban-map (pq visited walls)
+  (if (endp pq) (list visited walls)
+    (let* ((next (first pq))
+	   (pos (first next))
+	   (xoff (second next))
+	   (yoff (third next))
+	   (moves (find-predicate-arguments 'move-dir '(2 3) '(1) (list pos)
+					    *init*)))
+      (dolist (pair moves)
+	(when (not (member (first pair) visited :key #'first))
+	  (let ((xn (cond ((eq (second pair) 'dir-left) (- xoff 1))
+			  ((eq (second pair) 'dir-right) (+ xoff 1))
+			  (t xoff)))
+		(yn (cond ((eq (second pair) 'dir-up) (+ yoff 1))
+			  ((eq (second pair) 'dir-down) (- yoff 1))
+			  (t yoff))))
+	    (setq pq (nconc pq (list (list (first pair) xn yn))))
+	    (setq visited (cons (list (first pair) xn yn) visited))
+	    )))
+      (dolist (dir '(dir-left dir-right dir-up dir-down))
+	(when (not (member dir moves :key #'second))
+	  (setq walls (cons (list xoff yoff dir) walls))))
+      (get-sokoban-map (rest pq) visited walls)
+      )))
+
+;; calculate bounding box from segment list
+;; (defun calc-bounding-box (slist)
+;;   (let ((x 0) (y 0) (x-min 0) (y-min 0) (x-max 0) (y-max 0))
+;;     (dolist (seg slist)
+;;       (cond ((eq (cadr seg) 'move)
+;;     	     (dolist (arg (cdddr seg))
+;;     	       (setq x (+ x (first arg)))
+;;     	       (setq y (+ y (second arg)))
+;;     	       (setq x-min (min x x-min))
+;;     	       (setq x-max (max x x-max))
+;;     	       (setq y-min (min y y-min))
+;;     	       (setq y-max (max y y-max))))
+;; 	    ((eq (cadr seg) 'dir-up)
+;; 	     (setq y (+ y (fifth seg)))
+;; 	     (setq y-max (max (+ y 1) y-max)))
+;; 	    ((eq (cadr seg) 'dir-down)
+;; 	     (setq y (+ y (fifth seg)))
+;; 	     (setq y-min (min (- y 1) y-min)))
+;; 	    ((eq (cadr seg) 'dir-right)
+;; 	     (setq x (+ x (fourth seg)))
+;; 	     (setq x-max (max (+ x 1) x-max)))
+;; 	    ((eq (cadr seg) 'dir-left)
+;; 	     (setq x (+ x (fourth seg)))
+;; 	     (setq x-min (min (- x 1) x-min)))
+;; 	    (t (error "invalid segment type: ~a" (cadr seg)))
+;; 	    ))
+;;     (list (list x-min y-min) (list x-max y-max))
+;;     ))
+
+;; calculate bounding box from walls instead
+(defun calc-bounding-box (walls)
+  (let ((x-min 0) (y-min 0) (x-max 0) (y-max 0))
+    (dolist (wall walls)
+      (setq x-min (min x-min (first wall)))
+      (setq x-max (max x-max (first wall)))
+      (setq y-min (min y-min (second wall)))
+      (setq y-max (max y-max (second wall)))
+      )
     (list (list x-min y-min) (list x-max y-max))
     ))
 
@@ -399,30 +444,81 @@
 	(t (error "invalid segment type: ~a" (cadr seg)))
 	))
 
-;; (defun draw-sokoban-boxes (blist color to-stream)
-;;   (dolist (box blist)
-;;     (format to-stream "\\draw[thick,color=~a] (~a,~a) rectangle ++(~a,~a);~%"
-;; 	    color (- (first box) 0.5) (- (second box) 0.5) 1 1)))
-
 (defun draw-sokoban-boxes (blist color to-stream)
   (dolist (box blist)
-    (format to-stream "\\draw[thick,color=~a] (~a,~a) rectangle ++(~a,~a);~%"
-	    color (- (first box) 0.45) (- (second box) 0.45) 0.9 0.9)))
+    (format to-stream "\\draw[thick,color=~a,pattern=north east lines] (~a,~a) rectangle ++(~a,~a);~%"
+	    color (- (first box) 0.45) (- (second box) 0.45) 0.9 0.9)
+    ))
 
-(defvar *vis-sokoban-ghost-list-length* 1)
+(defun draw-sokoban-walls (walls color to-stream)
+  (dolist (wall walls)
+    (let ((x (first wall))
+	  (y (second wall))
+	  (dir (third wall)))
+      (cond ((eq dir 'dir-left)
+	     (format to-stream "\\draw[thick,color=~a] (~a,~a) -- (~a,~a);~%"
+		     color (- x 0.5) (- y 0.5) (- x 0.5) (+ y 0.5)))
+	    ((eq dir 'dir-right)
+	     (format to-stream "\\draw[thick,color=~a] (~a,~a) -- (~a,~a);~%"
+		     color (+ x 0.5) (- y 0.5) (+ x 0.5) (+ y 0.5)))
+	    ((eq dir 'dir-up)
+	     (format to-stream "\\draw[thick,color=~a] (~a,~a) -- (~a,~a);~%"
+		     color (- x 0.5) (+ y 0.5) (+ x 0.5) (+ y 0.5)))
+	    ((eq dir 'dir-down)
+	     (format to-stream "\\draw[thick,color=~a] (~a,~a) -- (~a,~a);~%"
+		     color (- x 0.5) (- y 0.5) (+ x 0.5) (- y 0.5)))
+	    ))
+    ))
+
+(defvar *vis-sokoban-ghost-list-length* 0)
+
+(defun initial-box-list (map box-type-name)
+  (remove 'nil
+	  (mapcar #'(lambda (box)
+		      (let ((pos (find-predicate-arguments
+				  'at '(2) '(1) (list box) *init*)))
+			(when (not (= (length pos) 1))
+			  (error "no uniqiue position for box ~s" box))
+			;; (format t "~%box ~s pos ~s ~s~%" box pos
+			;; 	(assoc (caar pos) (first map)))
+			(cdr (assoc (caar pos) (first map)))))
+		  (objects-of-type box-type-name *types* *objects*))))
+
+(defun goal-pos-list (map)
+  (remove 'nil
+	  (mapcar #'(lambda (tpos)
+		      (cdr (assoc (car tpos) (first map))))
+		  (find-predicate-arguments 'is-goal '(1) nil nil *init*))))
 
 (defun visualise-sokoban-IPC6 (plan ss &key (breaks nil) (boxlist nil))
   (let* ((slist (segment-sokoban-plan plan :breaks breaks))
 	 (glist nil)
-	 (blist boxlist)
-	 (bbox (calc-bounding-box slist)))
+	 (players (objects-of-type 'player *types* *objects*))
+	 (player-pos (find-predicate-arguments
+		      'at '(2) '(1) (list (car players)) *init*))
+	 (map (get-sokoban-map
+	       ;; initial queue: assumes only one player
+	       (cond ((= (length player-pos) 1)
+		      (list (list (caar player-pos) 0 0)))
+		     (t (error "no unique player position in init state: ~s ~s" players player-pos)))
+	       (list (list (caar player-pos) 0 0))
+	       nil))
+	 ;;(bbox (calc-bounding-box slist))
+	 (bbox (calc-bounding-box (second map)))
+	 (blist (if boxlist boxlist (initial-box-list map 'stone)))
+	 )
+    ;;(format t "~%segmented plan: ~s~%squares: ~s~%walls: ~s~%" slist (first map) (second map))
     (with-output-to-string
       (result)
       (dolist (seg slist)
 	(format result "~&\\begin{tikzpicture}[scale=0.5]~%")
-	(format result "\\draw (~a,~a) rectangle (~a,~a);~%"
-		(- (first (first bbox)) 0.5) (- (second (first bbox)) 0.5)
-		(+ (first (second bbox)) 0.5) (+ (second (second bbox)) 0.5))
+	;; (format result "\\draw (~a,~a) rectangle (~a,~a);~%"
+	;; 	(- (first (first bbox)) 0.5) (- (second (first bbox)) 0.5)
+	;; 	(+ (first (second bbox)) 0.5) (+ (second (second bbox)) 0.5))
+	(draw-sokoban-walls (second map) "black" result)
+	(dolist (pos (goal-pos-list map))
+	  (format result "~&\\node at (~a, ~a) {$\\star$};~%"
+		  (first pos) (second pos)))
 	(format result "\\node at (~a,~a) {~a};~%"
 		(first (first bbox)) (second (second bbox)) (car seg))
 	(dolist (seg glist)
