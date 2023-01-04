@@ -54,6 +54,15 @@ more than one :metric, but are otherwise standard (the metrics defined
 are also the same as in standard PDDL). Running inval with option -mo
 enables validation of multi-objective problems.
 
+## Directory `ppddl/`
+
+Examples of probabilistic planning (PPDDL) problems, and policies.
+
+`mk31{a,b}.pddl` are the two examples in Figure 3.1a and 3.1b,
+respectively, of Mausam and Kolobov's book ("Planning with Markov
+Decision Processes", Morgan & Claypool 2012). The same policy,
+`mk31.pol`, works for both examples.
+
 ## Directory `typing/`
 
 Example problems to illustrate some areas of confusion over the

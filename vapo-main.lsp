@@ -2,6 +2,7 @@
 
 ;; Note: load is only requried when used interactively or as a script.
 ;; (load "inval.lsp")
+;; (load "vapo.lsp")
 ;; (load "simplify.lsp")
 
 ;; GCL version
@@ -23,30 +24,38 @@
     (let ((state (first (nth index sgraph)))
 	  (action (second (nth index sgraph)))
 	  (trans (third (nth index sgraph)))
-	  (is-goal (fourth (nth index sgraph))))
-      (format t "~&~a state: ~a~%  goal? ~a~%  action: ~a~%  transitions: ~a~%"
-	      index state is-goal action trans)
+	  (is-goal (fourth (nth index sgraph)))
+	  (value (fifth (nth index sgraph)))
+	  )
+      (format t "~&S~a state: ~a~%  goal? ~a~%  action: ~a~%  transitions: ~a~%  expected reward: ~a~%"
+	      index state is-goal action trans value)
       )))
 
-(defun print-DOT-state (index state action is-goal &key (state-dec nil))
-  (format t "  S~a [shape=rectangle,peripheries=~a,label=\"S~a~a~a\"];~%"
-	  index (if is-goal 2 1) index
-	  (if state-dec ": " "")
-	  (cond ((equal state-dec "action") action)
-		((equal state-dec "state") state)
-		(t "")
-		)))
+(defun print-DOT-state (index state action is-goal value &key (label-states t) (state-dec nil))
+  (if label-states
+      (format t "  S~a [shape=rectangle,peripheries=~a,label=\"S~a~a~a (~a)\"];~%"
+	      index (if is-goal 2 1) index
+	      (if state-dec ": " "")
+	      (cond ((equal state-dec "action") action)
+		    ((equal state-dec "state") state)
+		    (t ""))
+	      value)
+    (format t "  S~a [shape=circle,peripheries=~a,label=\"\"];~%"
+	    index (if is-goal 2 1))))
 		 
 
-(defun print-DOT (sgraph &key (state-dec nil))
+(defun print-DOT (sgraph &key (dot-label t) (state-dec nil))
   (format t "~&digraph policy {~%")
   ;; print nodes
   (dotimes (index (length sgraph))
     (let ((state (first (nth index sgraph)))
 	  (action (second (nth index sgraph)))
 	  (trans (third (nth index sgraph)))
-	  (is-goal (fourth (nth index sgraph))))
-      (print-DOT-state index state action is-goal :state-dec state-dec)
+	  (is-goal (fourth (nth index sgraph)))
+	  (value (fifth (nth index sgraph)))
+	  )
+      (print-DOT-state index state action is-goal value
+		       :label-states dot-label :state-dec state-dec)
       ))
   ;; print edges
   (dotimes (index (length sgraph))
@@ -55,69 +64,14 @@
 	  (translist (third (nth index sgraph)))
 	  (is-goal (fourth (nth index sgraph))))
       (dolist (trans translist)
-	(if (not (eql (first trans) 1))
-	    (format t "  S~a -> S~a [label=\"~a\"];~%"
-		    index (second trans) (first trans))
-	  (format t "  S~a -> S~a;~%"
-		  index (second trans)))
+	(if (and (not (eql (first trans) 1)) dot-label)
+	    (format t "  S~a -> S~a [label=\"~a\\n~a\"];~%"
+		    index (second trans) (first trans) (third trans))
+	  (format t "  S~a -> S~a [label=\"~a\"];~%"
+		  index (second trans) (third trans)))
 	)))
     (format t "~&}~%")
   )
-
-(defun collect-arcs (sgraph)
-  (let ((outgoing (make-sequence 'vector (length sgraph) :initial-element nil))
-	(incoming (make-sequence 'vector (length sgraph) :initial-element nil)))
-    (dotimes (index (length sgraph))
-      (let ((translist (third (elt sgraph index))))
-	(setf (elt outgoing index) (mapcar #'second translist))
-	(dolist (trans translist)
-	  (setf (elt incoming (second trans))
-		(cons index (elt incoming (second trans)))))))
-    (values outgoing incoming)))
-
-(defun scc-dfs (index arcs visited node-list)
-  (setf (elt visited index) t)
-  (dolist (neigh (elt arcs index))
-    (when (not (elt visited neigh))
-      (setq node-list (scc-dfs neigh arcs visited node-list))))
-  (cons index node-list))
-
-(defun scc (sgraph)
-  (multiple-value-bind
-   (outgoing incoming) (collect-arcs sgraph)
-   (let ((visited (make-sequence 'vector (length sgraph) :initial-element nil))
-	 (post-order nil)
-	 (components nil))
-     (dotimes (k (length sgraph))
-       (when (not (elt visited k))
-	 (setq post-order (scc-dfs k outgoing visited post-order))))
-     ;; (format t "~&order = ~a" post-order)
-     (fill visited nil)
-     (dolist (k post-order)
-       (when (not (elt visited k))
-	 (let ((comp (scc-dfs k incoming visited nil)))
-	   (setq components (cons comp components)))))
-     (let ((n-to-c (make-sequence 'vector (length sgraph) :initial-element nil))
-	   (cout (make-sequence 'list (length components) :initial-element nil))
-	   (cin (make-sequence 'list (length components) :initial-element nil)))
-       (dotimes (cindex (length components))
-	 (dolist (node (elt components cindex))
-	   (setf (elt n-to-c node) cindex)))
-       (dotimes (cindex (length components))
-	 (dolist (node (elt components cindex))
-	   (setf (elt cout cindex)
-		 (union (elt cout cindex)
-			(remove-duplicates
-			 (mapcar #'(lambda (i) (elt n-to-c i))
-				 (elt outgoing node)))))
-	   (setf (elt cin cindex)
-		 (union (elt cin cindex)
-			(remove-duplicates
-			 (mapcar #'(lambda (i) (elt n-to-c i))
-				 (elt incoming node)))))
-	   ))
-       (mapcar #'list components cout cin))
-     )))
 
 (defun count-test-actions (sgel)
   (let ((action (second sgel)))
@@ -152,10 +106,13 @@
   ;; Process command line arguments and read input files.
   (if (endp (get-commandline-args)) (print-help))
   (let ((*policy* nil)
+	(*ambiguous-policy-resolver* nil)
 	(*expand-goal-states* nil)
 	(*exact-policy-match* nil)
 	(*ignore-static-predicates* nil)
+	(*print-state-graph* nil)
 	(*dot-state-decorate* nil)
+	(*dot-state-labels* t)
 	(*print-dot* nil)
 	(*count-test-actions* nil)
 	)
@@ -173,11 +130,17 @@
 		 (setq *exact-policy-match* t))
 		((equal arg "-isp")
 		 (setq *ignore-static-predicates* t))
+		((equal arg "-aok")
+		 (setq *ambiguous-policy-resolver* #'first))
+		((equal arg "-psg")
+		 (setq *print-state-graph* t))
 		((equal arg "-count-tests")
 		 (setq *count-test-actions* t))
 		((equal arg "-dot")
 		 (setq *print-dot* t)
 		 (format t "~&/*~%"))
+		((equal arg "-dnl")
+		 (setq *dot-state-labels* nil))
 		((equal arg "-dsd")
 		 (when (null (cdr rem-arg-list))
 		   (format t "~&-dsd requires an argument (action, state)~%")
@@ -199,6 +162,8 @@
     (format t "~&validating policy ~a...~%" (car *policy*))
     (let ((result (validate-policy (cdr *policy*) *init* *goal*
 				   *actions* *types* *objects*
+				   '(- (reward) 1) ;; reward exp
+				   :ambiguous-policy-resolver *ambiguous-policy-resolver*
 				   :expand-goal-states *expand-goal-states*
 				   :exact *exact-policy-match*
 				   :predicates-to-ignore
@@ -207,15 +172,23 @@
 					*predicates* *actions* *axioms*)
 				     nil)
 				   )))
-      (when (not (first result))
-	(format t "~&state graph construction failed~%"))
-      (print-state-graph (second result))
+      (cond
+       ((not (first result))
+	(format t "~&policy is not valid or not proper~%"))
+       (t
+	(format t "~&policy is executable and proper~%expected reward = ~a (~a)~%"
+		(second result) (float (second result))))
+       )
+      (when *print-state-graph*
+	(print-state-graph (third result)))
       (when *count-test-actions*
-	(let ((count (count-exp (second result) 0 nil #'count-test-actions)))
+	(let ((count (count-exp (third result) 0 nil #'count-test-actions)))
 	  (format t "~&expected number of test actions: ~a~%" count)))
       (when *print-dot*
 	(format t "~&*/~%")
-	(print-DOT (second result) :state-dec *dot-state-decorate*))
+	(print-DOT (third result)
+		   :dot-label *dot-state-labels*
+		   :state-dec *dot-state-decorate*))
       )))
 
 ;; Call main function inside an error handler.

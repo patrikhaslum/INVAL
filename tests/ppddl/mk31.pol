@@ -1,0 +1,6 @@
+
+;; same policy applies in both examples (only effects of a2 differ)
+
+(((s0)) (a0)) ;; in s0, take a0
+(((s1)) (a1)) ;; in s1, take a1
+(((s2)) (a2)) ;; in s2, take a2
