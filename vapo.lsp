@@ -17,8 +17,8 @@
 ;;    keyword argument 'exact:
 ;;    - if 'exact is non-nil, candidate rules are whose antecendent
 ;;      (partial state) match the state exactly, after all instances of
-;;      predicates in 'predicates-to-ignore have been removed from the
-;;      state;
+;;      predicates (and functions) in 'predicates-to-ignore have been
+;;      removed from the state;
 ;;    - if 'exact is nil, candidate rules are those whose antecedent is
 ;;      matched (i.e., implied) by the state and that are most specific;
 ;;      a partial state p is more specific than p' if p' is a strict
@@ -39,8 +39,8 @@
 ;; Returns a list (ok expected-reward state-graph), where:
 ;;  ok: is t iff the policy is valid (executes without error), and is
 ;;      proper
-;;  exepcted-reward: is the expected reward (negative cost); this
-;;      value is only meaningful if the policy is valid and proper
+;;  exepcted-reward: is the expected reward (negative cost); this value
+;;      may not be meaningful if the policy is not valid or not proper
 ;;  state-graph: is the policy-reachable sub-graph of the state space
 ;;      (as returned by build-state-graph).
 
@@ -63,7 +63,9 @@
 	    (lambda (state)
 	      (apply-exact-policy-to-state
 	       (remove-if #'(lambda (atom)
-			      (find (car atom) predicates-to-ignore))
+			      (if (eq (car atom) '=)
+				  (find (car (cadr atom)) predicates-to-ignore)
+				(find (car atom) predicates-to-ignore)))
 			  state)
 	       policy)))
 	   (t
@@ -77,10 +79,10 @@
 			     :ambiguous-policy-resolver ambiguous-policy-resolver
 			     :expand-goal-states expand-goal-states)))
     (if (first sg) ;; policy executed without error
-	(if (check-is-proper (second sg))
-	    (list t (if reward-exp (compute-expected-reward (second sg)) 0)
-		  (second sg))
-	  (list nil 0 (second sg))))
+	(list (check-is-proper (second sg))
+	      (if reward-exp (compute-expected-reward (second sg)) 0)
+	      (second sg))
+      (list nil 0 (second sg)))
     ))
 
 (defun fluents-in-term (term)
@@ -331,7 +333,7 @@
 	(dolist (item cands)
 	  (format t "~% ~s -> ~s matches~%" (first item) (second item))))
       (if ambiguous-policy-resolver
-	  (let ((chosen (funcall *ambiguous-policy-resolver* cands)))
+	  (let ((chosen (funcall ambiguous-policy-resolver cands)))
 	    (if chosen
 		(expand-state-with-action state (second chosen) actions
 					  types objects reward-exp

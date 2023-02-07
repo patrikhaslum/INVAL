@@ -162,23 +162,25 @@
     (format t "~&validating policy ~a...~%" (car *policy*))
     (let ((result (validate-policy (cdr *policy*) *init* *goal*
 				   *actions* *types* *objects*
-				   '(- (reward) 1) ;; reward exp
+				   ;; reward exp
+				   ;; '(- (reward) 1) - for Blai's "-C action"
+				   '(reward) ;; unmodified
 				   :ambiguous-policy-resolver *ambiguous-policy-resolver*
 				   :expand-goal-states *expand-goal-states*
 				   :exact *exact-policy-match*
 				   :predicates-to-ignore
 				   (if *ignore-static-predicates*
-				       (collect-static-predicates
-					*predicates* *actions* *axioms*)
+				       (append
+					(collect-static-predicates
+					 *predicates* *actions* *axioms*)
+					(collect-static-functions
+					 *functions* *actions*))
 				     nil)
 				   )))
-      (cond
-       ((not (first result))
-	(format t "~&policy is not valid or not proper~%"))
-       (t
-	(format t "~&policy is executable and proper~%expected reward = ~a (~a)~%"
-		(second result) (float (second result))))
-       )
+      (format t "~&policy is ~a~%expected reward = ~a (~a)~%"
+	      (if (first result) "executable and proper"
+		"not valid or not proper")
+	      (second result) (float (second result)))
       (when *print-state-graph*
 	(print-state-graph (third result)))
       (when *count-test-actions*
