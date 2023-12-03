@@ -1546,7 +1546,7 @@
 	(error "ill-formed effect formula: ~s" eff))
     (let ((vlist (eval-term-list (cdr (cadr eff)) reads state)))
       (list (and ok (not (some #'null (car vlist)))) (cadr vlist)
-	    add (cons (cons (car (cadr eff)) (car vlist)) del) ass rel)))
+	    add (add-to-set (cons (car (cadr eff)) (car vlist)) del :test #'equal) ass rel)))
    ((eq (car eff) 'assign)
     (if (not (= (length (cdr eff)) 2))
 	(error "ill-formed effect formula: ~s" eff))
@@ -1556,8 +1556,9 @@
 	   (v2 (eval-term  (caddr eff) (cadr vlist) state)))
       (list (and ok (not (some #'null (car vlist))) (not (null (car v2))))
 	    (cadr v2) add del
-	    (cons (list 'assign (cons (car (cadr eff)) (car vlist)) (car v2))
-		  ass)
+	    (add-to-set
+	     (list 'assign (cons (car (cadr eff)) (car vlist)) (car v2))
+	     ass :test #'equal)
 	    rel)))
    ((member (car eff) '(increase decrease))
     (if (not (= (length (cdr eff)) 2))
@@ -1568,14 +1569,16 @@
 	   (v2 (eval-term  (caddr eff) (cadr vlist) state)))
       (list (and ok (not (some #'null (car vlist))) (not (null (car v2))))
 	    (cadr v2) add del ass
-	    (cons (list (car eff) (cons (car (cadr eff)) (car vlist)) (car v2))
-		  rel))))
+	    (add-to-set
+	     (list (car eff) (cons (car (cadr eff)) (car vlist)) (car v2))
+	     rel :test #'equal))))
    ((member (car eff) *quoted-argument-predicates*)
-    (list ok reads (cons eff add) del ass rel))
+    (list ok reads (add-to-set eff add :test #'equal) del ass rel))
    (t
     (let ((vlist (eval-term-list (cdr eff) reads state)))
       (list (and ok (not (some #'null (car vlist)))) (cadr vlist)
-	    (cons (cons (car eff) (car vlist)) add) del ass rel)))
+	    (add-to-set (cons (car eff) (car vlist)) add :test #'equal)
+	    del ass rel)))
    ))
 
 ;; Apply a conflict-free set of action effects to a state:
@@ -4219,6 +4222,11 @@
 (defun make-trie-from-list (atoms)
   (trie-insert-list atoms (make-trie)))
 
+(defun make-trie-from-state (atoms)
+  (trie-insert-list
+   (remove-if #'(lambda (atom) (eq (car atom) '=)) atoms)
+   (make-trie)))
+
 ;; simple lookup: each element in atom is treated as a constant.
 
 (defun trie-contains (atom trie)
@@ -4404,7 +4412,7 @@
    ;; simple inequality (not (= atomic-term atomic-term))
    ((is-simple-inequality form)
     (satisfying-bindings-simple-inequality
-     (second form) (third form) trie binds vdecl types objects))
+     (second (second form)) (third (second form)) trie binds vdecl types objects))
    ;; non-simple equality: this is assumed to be a "flattened" fluent,
    ;; i.e., an atom of the form (= f arg .. arg val). It is handled
    ;; same as another atom, by lookup in the trie.

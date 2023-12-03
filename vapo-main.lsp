@@ -31,6 +31,27 @@
 	      index state is-goal action trans value)
       )))
 
+
+(defun is-action (exp)
+  (and (listp exp) (symbolp (car exp))))
+
+(defun is-action-list (exp)
+  (and (listp exp) (is-action (car exp))))
+
+;; (defun print-executed-policy (sgraph &key (predicates-to-ignore nil)
+;; 				     (select-actions nil)
+;; 				     (to-stream t))
+;;   (dolist (item sgraph)
+;;     ;; ...
+;;     (let ((rstate
+;; 	   (remove-if #'(lambda (atom)
+;; 			  (if (eq (car atom) '=)
+;; 			      (find (car (cadr atom)) predicates-to-ignore)
+;; 			    (find (car atom) predicates-to-ignore)))
+;; 		      (first item))))
+;;       (format to-stream "~&(~s~% ~s)~%" rstate (second item))
+;;       )))
+
 (defun print-DOT-state (index state action is-goal value &key (label-states t) (state-dec nil))
   (if label-states
       (format t "  S~a [shape=rectangle,peripheries=~a,label=\"S~a~a~a (~a)\"];~%"
@@ -107,9 +128,12 @@
   (if (endp (get-commandline-args)) (print-help))
   (let ((*policy* nil)
 	(*ambiguous-policy-resolver* nil)
+	(*reward-exp* '(reward))
 	(*expand-goal-states* nil)
 	(*exact-policy-match* nil)
+	(*write-executed-policy* nil)
 	(*ignore-static-predicates* nil)
+	(*abstract-state-graph* nil)
 	(*print-state-graph* nil)
 	(*dot-state-decorate* nil)
 	(*dot-state-labels* t)
@@ -132,8 +156,21 @@
 		 (setq *ignore-static-predicates* t))
 		((equal arg "-aok")
 		 (setq *ambiguous-policy-resolver* #'first))
+		((equal arg "-asg")
+		 (when (null (cdr rem-arg-list))
+		   (format t "~&-asg requires an argument~%")
+		   (quit))
+		 (setq *abstract-state-graph*
+		       (symbol-function (read-from-string (cadr rem-arg-list))))
+		 (setq rem-arg-list (cdr rem-arg-list)))
 		((equal arg "-psg")
 		 (setq *print-state-graph* t))
+		((equal arg "-wep")
+		 (setq *write-executed-policy* t))
+		((equal arg "-rno")
+		 (setq *reward-exp* nil))
+		((equal arg "-rca")
+		 (setq *reward-exp* '(- (reward) 1)))
 		((equal arg "-count-tests")
 		 (setq *count-test-actions* t))
 		((equal arg "-dot")
@@ -147,10 +184,27 @@
 		   (quit))
 		 (setq *dot-state-decorate* (cadr rem-arg-list))
 		 (setq rem-arg-list (cdr rem-arg-list)))
-		((= (length rem-arg-list) 1) ;; last arg is policy file
+		((equal arg "-tram")
+		 (setq *policy* (cons 'tram #'tram-policy-fn)))
+		((equal arg "-rand")
+		 (setq *policy* (cons 'random #'random-policy-fn)))
+		((and (= (length rem-arg-list) 1) ;; last arg is policy file
+		      (null *policy*))
 		 (format t "~&reading policy from ~a...~%" arg)
 		 (let ((contents (read-file arg)))
-		   (setq *policy* (parse-policy arg contents))))
+		   (setq *policy*
+			 (cond
+			  ;; if last exp in policy file is a lambda,
+			  ((eq (caar (last contents)) 'lambda)
+			   ;; eval all exps but the last...
+			   (do () ((= (length contents) 1))
+			       (eval (car contents))
+			       (setq contents (cdr contents)))
+			   ;; and return the last as the policy fun
+			   (cons arg (eval (car contents))))
+			  ;; else, parse as a rule-based policy
+			  (t (parse-policy arg contents)))
+			 )))
 		(t
 		 (format t "~&reading ~a...~%" arg)
 		 (let ((contents (read-file arg)))
@@ -161,10 +215,8 @@
     ;; main
     (format t "~&validating policy ~a...~%" (car *policy*))
     (let ((result (validate-policy (cdr *policy*) *init* *goal*
-				   *actions* *types* *objects*
-				   ;; reward exp
-				   ;; '(- (reward) 1) - for Blai's "-C action"
-				   '(reward) ;; unmodified
+				   *actions* *types* *objects* *reward-exp*
+				   :reward-fluents (if (null *reward-exp*) '((reward)) nil)
 				   :ambiguous-policy-resolver *ambiguous-policy-resolver*
 				   :expand-goal-states *expand-goal-states*
 				   :exact *exact-policy-match*
@@ -181,6 +233,24 @@
 	      (if (first result) "executable and proper"
 		"not valid or not proper")
 	      (second result) (float (second result)))
+      (when *matched*
+	(format t "~&~a of ~a rules matched in some state~%"
+		(length *matched*) (length (cdr *policy*)))
+	(when (and (< (length *matched*) (length (cdr *policy*)))
+		   (>= *verbosity* 1))
+	  (format t "~&unmatched rules:~%")
+	  (dolist (rule (cdr *policy*))
+	    (when (not (member rule *matched*))
+	      (format t "~&~a~%" rule)))
+	  ))
+      (when *abstract-state-graph*
+	(when *print-state-graph*
+	  (format t "~&BEFORE ABSTRACTION~%")
+	  (print-state-graph (third result)))
+	(setf (third result)
+	      (reduce-state-graph (third result)
+				  :abs-action-fn *abstract-state-graph*))
+	(format t "~&AFTER ABSTRACTION~%"))
       (when *print-state-graph*
 	(print-state-graph (third result)))
       (when *count-test-actions*
@@ -191,6 +261,19 @@
 	(print-DOT (third result)
 		   :dot-label *dot-state-labels*
 		   :state-dec *dot-state-decorate*))
+      ;; (when *write-executed-policy*
+      ;; 	(with-open-file
+      ;; 	 (stream "exec.pol" :direction :output)
+      ;; 	 (print-executed-policy
+      ;; 	  (third result)
+      ;; 	  :predicates-to-ignore (if *ignore-static-predicates*
+      ;; 				    (append
+      ;; 				     (collect-static-predicates
+      ;; 				      *predicates* *actions* *axioms*)
+      ;; 				     (collect-static-functions
+      ;; 				      *functions* *actions*))
+      ;; 				  nil)
+      ;; 	  :to-stream stream)))
       )))
 
 ;; Call main function inside an error handler.

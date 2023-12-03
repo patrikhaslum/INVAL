@@ -48,7 +48,9 @@
 			       &key (exact nil)
 			       (predicates-to-ignore nil)
 			       (ambiguous-policy-resolver nil)
-			       (expand-goal-states nil))
+			       (expand-goal-states nil)
+			       (reward-fluents nil))
+  (declare (special policy))
   (when (not (member 'probabilistic *quoted-argument-predicates*))
     (setq *quoted-argument-predicates*
 	  (cons 'probabilistic *quoted-argument-predicates*)))
@@ -75,7 +77,10 @@
 	   ))
 	 (sg ;; list (ok graph)
 	  (build-state-graph policy-fn init goal actions types objects
-			     reward-exp (fluents-in-term reward-exp)
+			     reward-exp
+			     (if (null reward-fluents)
+				 (fluents-in-term reward-exp)
+			       reward-fluents)
 			     :ambiguous-policy-resolver ambiguous-policy-resolver
 			     :expand-goal-states expand-goal-states)))
     (if (first sg) ;; policy executed without error
@@ -86,8 +91,9 @@
     ))
 
 (defun fluents-in-term (term)
-  (let ((res (eval-term term nil nil :report-errors nil)))
-    (second res)))
+  (if (null term) nil
+    (let ((res (eval-term term nil nil :report-errors nil)))
+      (second res))))
 
 ;; Check if a policy is proper. sgraph is the policy-reachable state graph
 ;; (as returned by build-state-graph). Returns t iff every terminal component
@@ -199,7 +205,13 @@
 ;; Returns: a list (ok graph), where ok is non-nil iff the policy
 ;; executes without error, and the the state graph is a list of
 ;; (state action transitions is-goal expected-reward) lists;
-;; transitions is a list of (probability index reward) pairs.
+;; transitions is a list of (probability index reward) lists.
+
+(defun sg-node-state (sgnode) (first sgnode))
+(defun sg-node-actions (sgnode) (second sgnode))
+(defun sg-node-transitions (sgnode) (third sgnode))
+(defun sg-node-isgoal (sgnode) (fourth sgnode))
+(defun sg-node-reward (sgnode) (fifth sgnode))
 
 (defun build-state-graph (policy-fn init goal actions types objects
 				    reward-exp reward-fluents
@@ -219,7 +231,8 @@
 	      (if (and (first goal-eval) (second goal-eval)
 		       (not expand-goal-states)) nil
 		(expand-state next-state policy-fn ambiguous-policy-resolver
-			      actions types objects reward-exp reward-fluents)))
+			      actions types objects reward-exp reward-fluents
+			      goal)))
 	     (exp-ok
 	      (if (and (first goal-eval) (second goal-eval)
 		       (not expand-goal-states)) t
@@ -301,6 +314,8 @@
 ;; Returns a list of the most specific ((partial state) (action))
 ;; pairs applicable to state.
 
+(defvar *matched* nil)
+
 (defun apply-most-specific-policy-to-state (state policy)
   (let ((cands nil))
     (dolist (item policy)
@@ -313,19 +328,30 @@
 			  (remove-if #'(lambda (citem)
 					 (more-specific (first item) (first citem)))
 				     cands))))))
+    (setq *matched* (union *matched* cands))
     cands))
 
 
 ;; Expand a state using a policy.
 ;; Returns a list (ok action successors), where successors is a list
-;; of pairs (probability state reward). Probabilities should sum to one.
+;; of lists (probability state reward). Probabilities should sum to one.
+;; If *macro-expand-deterministic* is non-nil, the successor state is
+;; recursively expanded if the action is deterministic (i.e., there is
+;; only one successor), and not a goal state. In this case, the second
+;; item of the returned list is a list (sequence) of actions.
 
-(defun expand-state (state policy-fn ambiguous-policy-resolver actions types objects reward-exp reward-fluents)
+(defvar *macro-expand-deterministic* t)
+
+(defun expand-state (state policy-fn ambiguous-policy-resolver actions types objects reward-exp reward-fluents goal)
+  ;; (declare (special policy))
   (let ((cands (funcall policy-fn state)))
     (cond
      ((endp cands)
       (when (>= *verbosity* 1)
-	(format t "~&policy has no action for state ~s~%" state))
+	(format t "~&policy has no action for state ~s~%" state)
+	;; (let ((acands (apply-most-specific-policy-to-state state policy)))
+	;;   (format t "~&alternative policy:~%~a~%" acands))
+	)
       (list t nil nil))
      ((> (length cands) 1)
       (when (>= *verbosity* 1)
@@ -335,18 +361,46 @@
       (if ambiguous-policy-resolver
 	  (let ((chosen (funcall ambiguous-policy-resolver cands)))
 	    (if chosen
-		(expand-state-with-action state (second chosen) actions
-					  types objects reward-exp
-					  reward-fluents)
+		(if *macro-expand-deterministic*
+		    (expand-state-rec (second chosen) state policy-fn ambiguous-policy-resolver actions types objects reward-exp reward-fluents goal)
+		  (expand-state-with-action state (second chosen) actions
+					    types objects reward-exp
+					    reward-fluents))
 	      ;; if resolver returns nil, return failure
 	      (list nil (mapcar #'second cands) nil)))
 	;; if resolver is nil (not set), return a failure
 	(list nil (mapcar #'second cands) nil)))
      (t ;; exactly one policy rule applies
-      (expand-state-with-action state (second (first cands)) actions
-				types objects reward-exp reward-fluents))
+      (if *macro-expand-deterministic*
+	  (expand-state-rec (second (first cands)) state policy-fn ambiguous-policy-resolver actions types objects reward-exp reward-fluents goal)
+	(expand-state-with-action state (second (first cands)) actions
+				  types objects reward-exp reward-fluents))
+      )
      )))
 
+(defun expand-state-rec (selected-action state policy-fn ambiguous-policy-resolver actions types objects reward-exp reward-fluents goal)
+  (let ((res (expand-state-with-action state selected-action actions types objects reward-exp reward-fluents)))
+    ;; (format t "~&res = ~a~%" res)
+    (if (not (first res)) res
+      (if (= (length (third res)) 1)
+	  (let ((goal-eval (eval-formula goal nil (second (first (third res))) types objects)))
+	    ;; if goal is undefined or satisfied, break
+	    (if (or (not (second goal-eval)) (first goal-eval))
+		(list (first res) (list (second res)) (third res))
+	      ;; else expand recursively
+	      (let ((cres (expand-state (second (first (third res))) policy-fn ambiguous-policy-resolver actions types objects reward-exp reward-fluents goal)))
+		(list (first cres) (cons selected-action (second cres))
+		      (mapcar #'(lambda (oc)
+				  (list (first oc) (second oc)
+					(if (and (third (first (third res))) (third oc))
+					    (+ (third (first (third res))) (third oc))
+					  nil)))
+			      (third cres))))
+	      ))
+	(list (first res) (list (second res)) (third res))
+	))
+    ))
+  
 (defun expand-state-with-action (state action actions types objects reward-exp reward-fluents)
   (when (>= *verbosity* 2)
     (format t "~&applying action ~s~%" action))
@@ -507,3 +561,203 @@
 	((find (car sub-pstate) super-pstate :test #'equal)
 	 (partial-state-contains super-pstate (cdr sub-pstate)))
 	(t nil)))
+
+;; List applicable actions
+
+(defun tram-policy-fn (state)
+  (let ((app (list-applicable-actions state *actions* *types* *objects*)))
+    (if (= (length app) 1) (list (list state (car app))) nil)))
+
+(defun random-policy-fn (state)
+  (let ((app (list-applicable-actions state *actions* *types* *objects*)))
+    (if (null app) nil
+      (list (list state (nth (random (length app)) app))))))
+
+(defun list-applicable-actions (state actions types objects)
+  (let ((facts (make-trie-from-list (remove-if #'(lambda (atom) (eq (car atom) '=)) state))))
+    (mapflat #'(lambda (action)
+		 (list-applicable-instances-of-action
+		  facts (car action) (cdr action) types objects))
+	     actions)))
+
+(defun list-applicable-instances-of-action (facts aname adef types objects)
+  (let ((param (assoc-val ':parameters adef))
+	(prec (assoc-val ':precondition adef)))
+    (mapcar
+     #'(lambda (binds)
+	 (cons aname
+	       (mapcar #'(lambda (pt)
+			   (if (assoc (car pt) binds)
+			       (cdr (assoc (car pt) binds)) pt))
+		       param)))
+     (satisfying-bindings prec facts nil param types objects))))
+
+;; Reduce a state graph by bisimilarity
+
+(defun abstract-sequence-match (acts1 acts2 distinguished)
+  (cond ((and (endp acts1) (endp acts2)) t)
+	((endp acts1) ;; only acts1 empty
+	 (if (member (caar acts2) distinguished) nil
+	   (abstract-sequence-match acts1 (cdr acts2) distinguished)))
+	((endp acts2) ;; only acts2 empty
+	 (if (member (caar acts1) distinguished) nil
+	   (abstract-sequence-match (cdr acts1) acts2 distinguished)))
+	((member (caar acts1) distinguished) ;; first in acts1 is dist.
+	 (if (not (equal (car acts1) (car acts2))) ;; not eq first in acts2
+	     (if (member (caar acts2) distinguished) nil
+	       (abstract-sequence-match acts1 (cdr acts2) distinguished))
+	   (abstract-sequence-match (cdr acts1) (cdr acts2) distinguished)))
+	(t
+	 (abstract-sequence-match (cdr acts1) acts2 distinguished))
+	))
+
+(defun abstract-all-actions (state aseq) nil)
+
+(defun reduce-state-graph (sgraph &key (abs-action-fn #'abstact-all-actions))
+  (let
+      ;; make an array of the sgraph nodes for quicker indexing
+      ((v (make-array (length sgraph) :initial-contents sgraph))
+       ;; 2-d bool array for state bisimilarity
+       (m (make-array (list (length sgraph) (length sgraph))
+		      :element-type 'cons :initial-element nil))
+       ;; 1-d index array to represent mftree set
+       (s (make-array (length sgraph)
+		      :element-type 'integer :initial-element 0))
+       (q nil))
+    ;; mark pairs of goal states
+    (dotimes (i (length sgraph))
+      (setf (aref m i i) t) ;; every state is bisim with itself
+      (dotimes (j (- (length sgraph) i))
+	(when (and (sg-node-isgoal (aref v i))
+		   (sg-node-isgoal (aref v (+ i j))))
+	  (format t "~&~a and ~a are both goal states~%" i (+ i j))
+	  (setf (aref m i (+ i j)) t)
+	  )))
+    ;; loop until no change
+    (do ((done nil)) ;; declare a loop var
+	(done nil) ;; exit when done is t
+	(setq done t)
+	;; check all non-bisim pairs
+	;; (format t "~&begin iteration...~%")
+	(dotimes (i (length sgraph))
+	  (dotimes (j (length sgraph))
+	    ;; (format t "~&~a, ~a: ~a ~a ~a~%~a~%~a~%" i j
+	    ;; 	    (not (aref m i j))
+	    ;; 	    (abstract-sequence-match (sg-node-actions (aref v i))
+	    ;; 				     (sg-node-actions (aref v j))
+	    ;; 				     key-actions)
+	    ;; 	    (mapcar #'(lambda (t1 t2)
+	    ;; 			(format t "~&t1 = ~a, t2 = ~a: ~a, ~a, ~a~%"
+	    ;; 				t1 t2
+	    ;; 				(eql (first t1) (first t2))
+	    ;; 				(eql (third t1) (third t2))
+	    ;; 				(aref m (second t1) (second t2)))
+	    ;; 			(and (eql (first t1) (first t2))
+	    ;; 			     (eql (third t1) (third t2))
+	    ;; 			     (aref m (second t1) (second t2))))
+	    ;; 		    (sg-node-transitions (aref v i))
+	    ;; 		    (sg-node-transitions (aref v j)))
+	    ;; 	    (sg-node-transitions (aref v i))
+	    ;; 	    (sg-node-transitions (aref v j))
+	    ;; 	    )
+	    (when (and
+		   (> j i)
+		   ;; not already marked
+		   (not (aref m i j))
+		   ;; matching number of outcomes
+		   (eql (length (sg-node-transitions (aref v i)))
+			(length (sg-node-transitions (aref v j))))
+		   ;; matching actions
+		   (equal
+		    (funcall abs-action-fn
+			     (sg-node-state (aref v i))
+			     (sg-node-actions (aref v i)))
+		    (funcall abs-action-fn
+			     (sg-node-state (aref v j))
+			     (sg-node-actions (aref v j)))
+		    )
+		   ;; transition probabilities and rewards match, and
+		   ;; resulting states are bisim
+		   (every #'(lambda (t1 t2)
+			      (and (eql (first t1) (first t2))
+				   (eql (third t1) (third t2))
+				   (aref m (second t1) (second t2))))
+			  (sg-node-transitions (aref v i))
+			  (sg-node-transitions (aref v j))))
+	      (format t "~&~a and ~a are bisimilar~%" i j)
+	      (setf (aref m i j) t)
+	      (setq done nil))
+	    ))
+	(format t "~&end iteration, done = ~a...~%" done)
+	) ;; end loop
+    (build-abstract-graph sgraph m abs-action-fn)
+    ))
+
+;; Find equivalence classes of sim relation (an nxn bool array); returns
+;; an assoc list mapping class representatives to lists of eq class members.
+(defun eq-classes (sim)
+  (let ((s (make-array (array-dimension sim 0)
+		       :element-type 'integer :initial-element 0))
+	(cls nil))
+    ;; init mftree
+    (dotimes (i (array-dimension sim 0))
+      (setf (aref s i) i))
+    ;; build mftree of equivalence classes
+    (dotimes (i (array-dimension sim 0))
+      (dotimes (j (- (array-dimension sim 0) i))
+	(when (aref sim i (+ i j))
+	  (setf (aref s (find-root s (+ i j))) (find-root s i)))))
+    ;; extract classes
+    (dotimes (i (array-dimension sim 0))
+      (setq cls (add-to-set-map (find-root s i) i cls)))
+    (values s cls)))
+
+;; find the root (representative) of index in mftree
+(defun find-root (mftree index)
+  (if (eql (aref mftree index) index) index
+    (find-root mftree (aref mftree index))))
+
+(defun find-class-index (classes index)
+  (dotimes (i (length classes))
+    (when (member index (cdr (elt classes i)))
+      (return-from find-class-index i)))
+  (error "~&invalid index ~s for~%~s~%" index classes))
+
+(defun compose-abstract-transitions (si-list sgraph classes)
+  (let ((ats nil)) ;; abstract transitions
+    (dolist (si si-list)
+      (let ((sg-node (elt sgraph si)))
+	;; (format t "~&~a: ~a~%" si (sg-node-transitions sg-node))
+	(dolist (trans (sg-node-transitions sg-node))
+	  (let ((atrans (list (find-class-index classes (second trans))
+			      (third trans))))
+	    (setq ats
+		  (reassoc
+		   atrans
+		   (+ (if (assoc-val atrans ats) (assoc-val atrans ats) 0)
+		      (/ (first trans) (length si-list)))
+		   ats))))
+	;; (format t "~&~a: ~a~%" si ats)
+	))
+    (mapcar #'(lambda (atrans)
+		(cons (cdr atrans) (car atrans)))
+	    ats)))
+
+;; Returns the abstract state graph built from sgraph and bisimilarity
+;; relation.
+(defun build-abstract-graph (sgraph bisim abs-action-fn)
+  (multiple-value-bind
+   (mftree classes) (eq-classes bisim)
+   (format t "~&~a equivalence classes~%" (length classes))
+   (mapcar
+    #'(lambda (cls)
+	(list
+	 (cdr cls)
+	 (funcall abs-action-fn
+		  (sg-node-state (elt sgraph (car cls)))
+		  (sg-node-actions (elt sgraph (car cls))))
+	 (compose-abstract-transitions (cdr cls) sgraph classes)
+	 (sg-node-isgoal (elt sgraph (car cls)))
+	 (sg-node-reward (elt sgraph (car cls)))
+	 ))
+    classes)))
